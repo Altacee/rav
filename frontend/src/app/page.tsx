@@ -275,12 +275,21 @@ export default function Home() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
-        {/* Branding */}
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-foreground">
-            Rav
-          </h1>
-          <p className="mt-2 text-sm text-muted-foreground">
+        {/* Branding — the altacee mark: square gold tile, heavy grotesque A,
+            wordmark above the product line (see altacee.com's header). */}
+        <div className="mb-8 flex flex-col items-center gap-4">
+          <div className="flex size-12 select-none items-center justify-center bg-primary text-xl font-black text-primary-foreground">
+            A
+          </div>
+          <div className="text-center">
+            <p className="text-[0.9375rem] font-extrabold tracking-wider text-foreground">
+              ALTACEE
+            </p>
+            <p className="mt-1 text-[0.6875rem] font-bold tracking-widest text-muted-foreground">
+              MAIL
+            </p>
+          </div>
+          <p className="text-sm text-muted-foreground">
             Sign in to your account
           </p>
         </div>

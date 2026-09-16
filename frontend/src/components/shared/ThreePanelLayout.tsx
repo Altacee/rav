@@ -289,8 +289,8 @@ export function ThreePanelLayout({
                 <div className="flex min-h-0 flex-1">{readingPane}</div>
               ) : (
                 <div className="flex h-full w-full items-center justify-center">
-                  <span className="text-2xl font-bold tracking-tight text-muted-foreground/40 select-none">
-                    Rav
+                  <span className="text-2xl font-extrabold tracking-widest text-muted-foreground/40 select-none">
+                    ALTACEE
                   </span>
                 </div>
               )}

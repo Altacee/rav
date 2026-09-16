@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Altacee">
+  <!--
+    The studio mark, drawn as a path rather than set in Inter: a favicon renders on
+    machines that do not have the font, and a fallback "A" in Times is not our mark.
+    Geometry traced from the header logo — square field, heavy grotesque A.
+  -->
+  <rect width="512" height="512" fill="#D4AF37"/>
+  <path fill="#080808" fill-rule="evenodd"
+        d="M96 416 L200 96 L312 96 L416 416 L330 416 L306 344 L206 344 L182 416 Z
+           M226 274 L286 274 L256 178 Z"/>
+</svg>
