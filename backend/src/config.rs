@@ -122,6 +122,12 @@ pub struct AppConfig {
     #[serde(default)]
     pub sieve_host: Option<String>,
 
+    /// How many authenticated IMAP sessions per account are kept for reuse.
+    /// mailcow is a shared host: this is a number to be kind with, not one to
+    /// maximise.
+    #[serde(default = "default_imap_pool_size")]
+    pub imap_pool_size: usize,
+
     /// ManageSieve server port.
     #[serde(default = "default_sieve_port")]
     pub sieve_port: u16,
@@ -149,6 +155,10 @@ pub struct AppConfig {
 
 fn default_pgp_enabled() -> bool {
     true
+}
+
+fn default_imap_pool_size() -> usize {
+    3
 }
 
 fn default_sieve_port() -> u16 {

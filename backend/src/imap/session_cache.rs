@@ -5,35 +5,45 @@ use tokio::sync::Semaphore;
 
 use super::connection::{connect, ImapStream};
 use super::error::ImapError;
+use super::pool::Pool;
 use super::types::ImapCredentials;
 
 /// An authenticated IMAP session over our stream wrapper.
 pub type ImapSession = async_imap::Session<ImapStream>;
 
 /// Max number of brand-new IMAP connections (TCP+TLS+LOGIN) allowed to be
-/// opened concurrently for a single account. Only one cached slot exists per
-/// account, so any request that doesn't win it falls through to `connect()`;
+/// opened concurrently for a single account. Only a few idle slots exist per
+/// account beyond the pooled ones, so a request that finds the pool empty
+/// falls through to `connect()`;
 /// without a cap, a burst of concurrent requests (e.g. an unbatched bulk
 /// action over hundreds of messages) opens one connection per request all at
 /// once, which is what actually OOM-killed the process.
 const MAX_CONCURRENT_CONNECTS_PER_ACCOUNT: usize = 4;
 
-/// One reusable session per account (email@host).
+/// Up to `max_idle` reusable sessions per account (email@host).
 ///
-/// Acquiring takes the session out of the slot; releasing puts it back.
-/// On error paths, callers simply drop the session rather than calling
-/// `release`, ensuring a broken connection is never reused.
+/// Acquiring takes a session out of the pool; releasing puts it back. On error
+/// paths, callers simply drop the session rather than calling `release`,
+/// ensuring a broken connection is never reused.
 pub struct SessionCache {
-    slots: Mutex<HashMap<String, ImapSession>>,
+    pool: Pool<ImapSession>,
     connect_limits: Mutex<HashMap<String, Arc<Semaphore>>>,
 }
 
 impl SessionCache {
-    pub fn new() -> Self {
+    /// `max_idle` is how many authenticated sessions per account are kept for
+    /// reuse. It is not a limit on live connections — that is still
+    /// `MAX_CONCURRENT_CONNECTS_PER_ACCOUNT`, which must not move.
+    pub fn new(max_idle: usize) -> Self {
         SessionCache {
-            slots: Mutex::new(HashMap::new()),
+            pool: Pool::new(max_idle),
             connect_limits: Mutex::new(HashMap::new()),
         }
+    }
+
+    #[cfg(test)]
+    fn max_idle(&self) -> usize {
+        self.pool.capacity()
     }
 
     fn key(creds: &ImapCredentials) -> String {
@@ -59,11 +69,8 @@ impl SessionCache {
         tls_connector: &async_native_tls::TlsConnector,
     ) -> Result<ImapSession, ImapError> {
         let key = Self::key(creds);
-        {
-            let mut slots = self.slots.lock().unwrap();
-            if let Some(session) = slots.remove(&key) {
-                return Ok(session);
-            }
+        if let Some(session) = self.pool.take(&key) {
+            return Ok(session);
         }
         // Bound how many callers can open a fresh connection for this
         // account at once; excess callers queue here instead of all
@@ -76,10 +83,41 @@ impl SessionCache {
         connect(creds, connect_host, tls_connector).await
     }
 
-    /// Return a healthy session to the cache after a successful operation.
+    /// Return a healthy session for reuse after a successful operation. Beyond
+    /// the pool's capacity the session is dropped, which closes the socket.
     pub fn release(&self, creds: &ImapCredentials, session: ImapSession) {
-        let key = Self::key(creds);
-        let mut slots = self.slots.lock().unwrap();
-        slots.insert(key, session);
+        self.pool.put(&Self::key(creds), session);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn creds() -> ImapCredentials {
+        ImapCredentials {
+            host: "mail.example.com".into(),
+            port: 993,
+            tls: true,
+            email: "a@example.com".into(),
+            password: "x".into(),
+        }
+    }
+
+    #[test]
+    fn the_key_separates_accounts_and_hosts() {
+        let a = creds();
+        let mut b = creds();
+        b.email = "b@example.com".into();
+        let mut c = creds();
+        c.host = "other.example.com".into();
+        assert_ne!(SessionCache::key(&a), SessionCache::key(&b));
+        assert_ne!(SessionCache::key(&a), SessionCache::key(&c));
+    }
+
+    #[test]
+    fn the_configured_size_is_what_the_pool_holds() {
+        let cache = SessionCache::new(3);
+        assert_eq!(cache.max_idle(), 3);
     }
 }

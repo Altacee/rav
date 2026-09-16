@@ -69,6 +69,7 @@ mod tests {
             trusted_proxies: String::new(),
             pgp_enabled: true,
             sieve_host: None,
+            imap_pool_size: 3,
             sieve_port: 4190,
             sieve_allow_plaintext: false,
             db_pool_max_connections_per_user: 4,
