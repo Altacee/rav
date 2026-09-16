@@ -8,6 +8,7 @@ import {
   useUpdateNotificationPreferences,
 } from "@/hooks/useNotificationPreferences";
 import { useNotifications } from "@/hooks/useNotifications";
+import { PushSettings } from "./PushSettings";
 import { useQuietHours } from "@/hooks/useQuietHours";
 import { useFolders } from "@/hooks/useFolders";
 import { Switch } from "@/components/ui/switch";
@@ -117,6 +118,8 @@ export function NotificationSettings() {
           Browser notifications are blocked. Enable them in your browser settings to receive desktop alerts.
         </div>
       )}
+
+      <PushSettings />
 
       <div className="space-y-3">
         <Toggle
