@@ -16,6 +16,7 @@ impl<T> Pool<T> {
         Pool { slots: Mutex::new(HashMap::new()), max_idle }
     }
 
+    #[cfg(test)]
     pub fn capacity(&self) -> usize {
         self.max_idle
     }
@@ -41,7 +42,7 @@ impl<T> Pool<T> {
         true
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn idle_count(&self, key: &str) -> usize {
         self.slots.lock().unwrap().get(key).map_or(0, Vec::len)
     }
