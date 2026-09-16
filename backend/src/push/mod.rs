@@ -6,3 +6,5 @@
 //! holding a credential — see `credential` for what is held and how.
 
 pub mod credential;
+pub mod sender;
+pub mod worker;

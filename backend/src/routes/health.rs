@@ -66,6 +66,9 @@ mod tests {
             rspamd_password: None,
             mailcow_api_url: None,
             mailcow_api_key: None,
+            push_credential_key: None,
+            push_vapid_key: None,
+            push_vapid_subject: None,
             link_proxy_enabled: false,
             webauthn_rp_id: None,
             webauthn_rp_origin: None,
@@ -140,6 +143,7 @@ mod tests {
             passkey_service,
             link_proxy_secret: None,
             draft_locks: Arc::new(crate::routes::drafts::DraftLocks::new()),
+            push_wake: Arc::new(tokio::sync::Notify::new()),
         });
 
         let response = app

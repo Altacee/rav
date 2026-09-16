@@ -17,6 +17,7 @@ pub mod link_proxy;
 pub mod messages;
 pub mod notification_preferences;
 pub mod outbox;
+pub mod push;
 pub mod quota;
 pub mod search;
 pub mod pgp;
@@ -152,6 +153,9 @@ pub struct AppServices {
     pub link_proxy_secret: Option<Arc<LinkProxySecret>>,
     pub draft_locks: Arc<drafts::DraftLocks>,
     pub db_pool_manager: Arc<crate::db::pool::DbPoolManager>,
+    /// Poked when a push credential is stored or deleted, so the push worker
+    /// picks the change up now rather than at its next rescan.
+    pub push_wake: push::PushWake,
 }
 
 /// Lets handlers take a single `AppServices` param instead of one `Extension<Arc<X>>`
@@ -198,12 +202,14 @@ where
                 .map(|Extension(v)| v),
             draft_locks: ext!(Arc<drafts::DraftLocks>),
             db_pool_manager: ext!(Arc<crate::db::pool::DbPoolManager>),
+            push_wake: ext!(push::PushWake),
         })
     }
 }
 
 pub fn create_router(svc: AppServices) -> Router {
     let AppServices {
+        push_wake,
         config,
         transport,
         store,
@@ -450,6 +456,17 @@ pub fn create_router(svc: AppServices) -> Router {
         .route("/filters/{id}", put(filters::update_filter_handler).delete(filters::delete_filter_handler))
         .route("/settings/vacation", get(vacation::get_vacation_handler).put(vacation::update_vacation_handler))
         .route("/quota", get(quota::get_quota))
+        // Push: config for the browser, the stored credential that keeps IDLE
+        // alive past the last tab, and this browser's subscription.
+        .route("/push/config", get(push::get_config_handler))
+        .route(
+            "/push/credential",
+            put(push::store_credential_handler).delete(push::delete_credential_handler),
+        )
+        .route(
+            "/push/subscription",
+            post(push::subscribe_handler).delete(push::unsubscribe_handler),
+        )
         .route("/pgp/keys", get(pgp::list_keys).post(pgp::store_key))
         .route("/pgp/keys/{id}", get(pgp::get_key).delete(pgp::delete_key))
         .route("/pgp/keys/{id}/identity", put(pgp::assign_identity))
@@ -519,6 +536,7 @@ pub fn create_router(svc: AppServices) -> Router {
         .layer(Extension(passkey_service))
         .layer(Extension(draft_locks))
         .layer(Extension(db_pool_manager))
+        .layer(Extension(push_wake))
         .layer(Extension(config.clone()))
         .layer(TraceLayer::new_for_http());
 
