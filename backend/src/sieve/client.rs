@@ -1,105 +1,181 @@
-use base64::Engine;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::time::{timeout, Duration};
 
-/// Upload a Sieve script via ManageSieve (RFC 5804), plain TCP (no TLS).
-/// Intended for internal Docker use where Rav and Dovecot share a network.
+use super::protocol::Sieve;
+
+/// Upload and activate a Sieve script over ManageSieve (RFC 5804).
+///
+/// The password is only ever written to an encrypted stream. mailcow advertises
+/// `"SASL" ""` until STARTTLS succeeds, so a plaintext attempt would both fail
+/// and put a mailbox credential on the public internet. `allow_plaintext`
+/// exists solely for a loopback test server.
+/// Where to push, and on what terms. Bundled because the crate forbids
+/// long argument lists, and these four always travel together.
+pub struct SieveTarget<'a> {
+    pub host: &'a str,
+    pub port: u16,
+    pub tls: &'a async_native_tls::TlsConnector,
+    /// Only ever true for a loopback test server. See `push_script`.
+    pub allow_plaintext: bool,
+}
+
 pub async fn push_script(
-    host: &str,
-    port: u16,
+    target: SieveTarget<'_>,
     email: &str,
     password: &str,
     script_name: &str,
     script: &str,
 ) -> Result<(), String> {
-    timeout(Duration::from_secs(10), do_push(host, port, email, password, script_name, script))
-        .await
-        .map_err(|_| "ManageSieve: connection timed out".to_string())?
+    timeout(
+        Duration::from_secs(15),
+        do_push(target, email, password, script_name, script),
+    )
+    .await
+    .map_err(|_| "ManageSieve: connection timed out".to_string())?
 }
 
 async fn do_push(
-    host: &str,
-    port: u16,
+    target: SieveTarget<'_>,
     email: &str,
     password: &str,
     script_name: &str,
     script: &str,
 ) -> Result<(), String> {
-    let stream = TcpStream::connect((host, port))
+    let SieveTarget { host, port, tls, allow_plaintext } = target;
+    let tcp = TcpStream::connect((host, port))
         .await
         .map_err(|e| format!("ManageSieve: connect failed: {e}"))?;
 
-    let (reader, mut writer) = stream.into_split();
-    let mut reader = BufReader::new(reader);
+    let mut plain = Sieve::new(tcp);
+    let caps = plain.read_capabilities().await?;
 
-    // Read server greeting
-    read_response(&mut reader).await?;
+    if caps.starttls {
+        plain.request_starttls().await?;
+        let stream = tls
+            .connect(host, plain.into_inner())
+            .await
+            .map_err(|e| format!("ManageSieve: TLS handshake failed: {e}"))?;
+        let mut secure = Sieve::new(stream);
+        // RFC 5804: the server re-issues its capabilities after TLS, and that is
+        // the first time mailcow names a SASL mechanism. Read them, then log in.
+        secure.read_capabilities().await?;
+        return run_session(&mut secure, email, password, script_name, script).await;
+    }
 
-    // AUTHENTICATE "PLAIN" base64(\0email\0password)
-    let mut creds = vec![0u8];
-    creds.extend_from_slice(email.as_bytes());
-    creds.push(0);
-    creds.extend_from_slice(password.as_bytes());
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&creds);
+    if !allow_plaintext {
+        return Err(
+            "ManageSieve: server offers no STARTTLS; refusing to authenticate over plaintext"
+                .to_string(),
+        );
+    }
+    run_session(&mut plain, email, password, script_name, script).await
+}
 
-    writer
-        .write_all(format!("AUTHENTICATE \"PLAIN\" \"{encoded}\"\r\n").as_bytes())
-        .await
-        .map_err(|e| format!("ManageSieve: write auth failed: {e}"))?;
-    read_response(&mut reader).await?;
-
-    // PUTSCRIPT
-    let script_bytes = script.as_bytes();
-    let byte_count = script_bytes.len();
-    writer
-        .write_all(
-            format!("PUTSCRIPT \"{script_name}\" {{{byte_count}+}}\r\n").as_bytes(),
-        )
-        .await
-        .map_err(|e| format!("ManageSieve: write putscript header failed: {e}"))?;
-    writer
-        .write_all(script_bytes)
-        .await
-        .map_err(|e| format!("ManageSieve: write script body failed: {e}"))?;
-    writer
-        .write_all(b"\r\n")
-        .await
-        .map_err(|e| format!("ManageSieve: write putscript terminator failed: {e}"))?;
-    read_response(&mut reader).await?;
-
-    // SETACTIVE
-    writer
-        .write_all(format!("SETACTIVE \"{script_name}\"\r\n").as_bytes())
-        .await
-        .map_err(|e| format!("ManageSieve: write setactive failed: {e}"))?;
-    read_response(&mut reader).await?;
-
-    // LOGOUT
-    let _ = writer.write_all(b"LOGOUT\r\n").await;
-
+async fn run_session<S>(
+    sieve: &mut Sieve<S>,
+    email: &str,
+    password: &str,
+    script_name: &str,
+    script: &str,
+) -> Result<(), String>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    sieve.authenticate_plain(email, password).await?;
+    sieve.put_script(script_name, script).await?;
+    sieve.set_active(script_name).await?;
+    sieve.logout().await;
     Ok(())
 }
 
-/// Read response lines until an OK, NO, or BYE line is found.
-async fn read_response(reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>) -> Result<(), String> {
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let n = reader
-            .read_line(&mut line)
-            .await
-            .map_err(|e| format!("ManageSieve: read error: {e}"))?;
-        if n == 0 {
-            return Err("ManageSieve: connection closed unexpectedly".to_string());
-        }
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("OK") {
-            return Ok(());
-        }
-        if trimmed.starts_with("NO") || trimmed.starts_with("BYE") {
-            return Err(format!("ManageSieve: server error: {}", line.trim()));
-        }
-        // Capability lines and continuation lines - keep reading
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    /// A loopback ManageSieve server that answers OK to everything and records
+    /// what arrived. `banner` decides whether it advertises STARTTLS; the TLS
+    /// handshake itself is never completed, because these tests are about what
+    /// the client does *before* encryption exists.
+    async fn fake_server(banner: &'static str) -> (String, u16, tokio::task::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            sock.write_all(banner.as_bytes()).await.unwrap();
+            let mut seen = Vec::new();
+            let mut buf = [0u8; 1024];
+            loop {
+                match sock.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        seen.extend_from_slice(&buf[..n]);
+                        if sock.write_all(b"OK \"fine\"\r\n").await.is_err() {
+                            break;
+                        }
+                        // Hang up right after acknowledging STARTTLS: the client
+                        // then fails its handshake immediately instead of sitting
+                        // out the 15s timeout, and the assertion is the same.
+                        if seen.windows(8).any(|w| w == b"STARTTLS")
+                            || seen.windows(9).any(|w| w == b"SETACTIVE")
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+            String::from_utf8_lossy(&seen).to_string()
+        });
+        (addr.ip().to_string(), addr.port(), handle)
+    }
+
+    fn test_connector() -> async_native_tls::TlsConnector {
+        async_native_tls::TlsConnector::from(native_tls::TlsConnector::builder())
+    }
+
+    const OFFERS_STARTTLS: &str = "\"SASL\" \"\"\r\n\"STARTTLS\"\r\nOK \"ready\"\r\n";
+    const NO_STARTTLS: &str = "\"SASL\" \"PLAIN\"\r\nOK \"ready\"\r\n";
+
+    #[tokio::test]
+    async fn never_authenticates_before_tls() {
+        let (host, port, handle) = fake_server(OFFERS_STARTTLS).await;
+        let result = push_script(
+            SieveTarget { host: &host, port, tls: &test_connector(), allow_plaintext: false },
+            "a@b.com", "hunter2", "rav-filters", "keep;\r\n",
+        )
+        .await;
+        let written = handle.await.unwrap();
+        assert!(written.contains("STARTTLS"), "client must request STARTTLS: {written}");
+        assert!(!written.contains("AUTHENTICATE"), "password must never precede TLS: {written}");
+        assert!(result.is_err(), "a failed TLS handshake must not fall back to plaintext");
+    }
+
+    #[tokio::test]
+    async fn refuses_a_server_that_offers_no_starttls() {
+        let (host, port, handle) = fake_server(NO_STARTTLS).await;
+        let result = push_script(
+            SieveTarget { host: &host, port, tls: &test_connector(), allow_plaintext: false },
+            "a@b.com", "hunter2", "rav-filters", "keep;\r\n",
+        )
+        .await;
+        let err = result.unwrap_err();
+        let written = handle.await.unwrap();
+        assert!(!written.contains("AUTHENTICATE"), "no plaintext auth without opt-in: {written}");
+        assert!(err.contains("plaintext"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn allows_plaintext_only_when_explicitly_opted_in() {
+        let (host, port, handle) = fake_server(NO_STARTTLS).await;
+        let result = push_script(
+            SieveTarget { host: &host, port, tls: &test_connector(), allow_plaintext: true },
+            "a@b.com", "hunter2", "rav-filters", "keep;\r\n",
+        )
+        .await;
+        let written = handle.await.unwrap();
+        assert!(written.contains("AUTHENTICATE"), "opt-in should authenticate: {written}");
+        assert!(written.contains("SETACTIVE"), "opt-in should activate the script: {written}");
+        assert!(result.is_ok(), "{result:?}");
     }
 }
