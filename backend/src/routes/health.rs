@@ -63,6 +63,7 @@ mod tests {
             base_path: None,
             allow_custom_mail_servers: true,
             rspamd_url: None,
+            rspamd_password: None,
             link_proxy_enabled: false,
             webauthn_rp_id: None,
             webauthn_rp_origin: None,
