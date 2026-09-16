@@ -261,9 +261,9 @@ pub struct RealImapClient {
 }
 
 impl RealImapClient {
-    pub fn new(transport: Arc<MailTransport>) -> Self {
+    pub fn new(transport: Arc<MailTransport>, pool_size: usize) -> Self {
         RealImapClient {
-            cache: SessionCache::new(),
+            cache: SessionCache::new(pool_size),
             transport,
         }
     }

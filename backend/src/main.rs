@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let transport = Arc::new(MailTransport::from_config(&config));
 
     // Create the IMAP and SMTP clients for production use.
-    let imap_client: Arc<dyn imap::client::ImapClient> = Arc::new(RealImapClient::new(Arc::clone(&transport)));
+    let imap_client: Arc<dyn imap::client::ImapClient> = Arc::new(RealImapClient::new(Arc::clone(&transport), config.imap_pool_size));
     let smtp_client: Arc<dyn smtp::client::SmtpClient> = Arc::new(RealSmtpClient);
 
     // Shared HTTP client for rspamd and any other outbound HTTP calls.

@@ -651,7 +651,7 @@ mod tests {
             imap_connect_host: "127.0.0.1".to_string(),
             smtp_connect_host: "127.0.0.1".to_string(),
             smtp_tls_params: None,
-        }));
+        }), 3);
         let creds = test_creds();
 
         let err = client.list_folders(&creds).await.unwrap_err();
@@ -833,7 +833,7 @@ mod tests {
             imap_connect_host: "127.0.0.1".to_string(),
             smtp_connect_host: "127.0.0.1".to_string(),
             smtp_tls_params: None,
-        }));
+        }), 3);
         let folders = client.list_folders(&creds).await.unwrap();
         assert!(!folders.is_empty(), "expected at least one folder");
         let names: Vec<_> = folders.iter().map(|f| f.name.as_str()).collect();
@@ -852,7 +852,7 @@ mod tests {
             imap_connect_host: "127.0.0.1".to_string(),
             smtp_connect_host: "127.0.0.1".to_string(),
             smtp_tls_params: None,
-        }));
+        }), 3);
         let headers = client
             .fetch_headers(&creds, "INBOX", "1:5")
             .await
@@ -872,7 +872,7 @@ mod tests {
             imap_connect_host: "127.0.0.1".to_string(),
             smtp_connect_host: "127.0.0.1".to_string(),
             smtp_tls_params: None,
-        }));
+        }), 3);
 
         // First fetch headers to find a UID.
         let headers = client
