@@ -34,6 +34,10 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [remember, setRemember] = useState(false);
+  /** Set once the server answers `mfa_required`: the account has TOTP enrolled
+   *  and the code has to come with the next attempt. */
+  const [needsTotp, setNeedsTotp] = useState(false);
+  const [totpCode, setTotpCode] = useState("");
   const [loading, setLoading] = useState(false);
   const effectiveAnimationMode = useUiStore((s: UiState) => s.effectiveAnimationMode);
   const overlayMotionProps = useMemo(() => createFadeSlideVariants(effectiveAnimationMode, "y"), [effectiveAnimationMode]);
@@ -45,6 +49,8 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
     setPassword("");
     setError(null);
     setRemember(false);
+    setNeedsTotp(false);
+    setTotpCode("");
     onClose();
   }
 
@@ -65,10 +71,32 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
       payload.browser_id = browserId;
     }
 
+    if (totpCode.trim()) {
+      payload.totp_code = totpCode.replace(/\s/g, "");
+    }
+
     try {
       const response = await apiPost<{
-        account: { id: string; email: string; imapHost: string; smtpHost: string };
+        mfa_required?: boolean;
+        account?: { id: string; email: string; imapHost: string; smtpHost: string };
       }>("/auth/login", payload);
+
+      // An account with two-factor enabled answers 200 with no account at all:
+      // ask for the code and re-submit, the same as the sign-in screen does.
+      if (response.mfa_required) {
+        setNeedsTotp(true);
+        setTotpCode("");
+        setLoading(false);
+        return;
+      }
+
+      if (!response.account) {
+        // Anything else without an account is a shape we do not know. Say so,
+        // rather than dereferencing undefined and showing a TypeError.
+        setError("Sign-in could not be completed. Please try again.");
+        setLoading(false);
+        return;
+      }
 
       const accountsData = await fetchAccounts();
       setAccounts(accountsData.accounts);
@@ -163,6 +191,26 @@ export function AddAccountModal({ open, onClose }: AddAccountModalProps) {
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
+            {needsTotp && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="add-totp">Verification code</Label>
+                <Input
+                  id="add-totp"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="6-digit code"
+                  required
+                  autoFocus
+                  disabled={loading}
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  This account has two-factor authentication enabled.
+                </p>
+              </div>
+            )}
+
             <label htmlFor="add-remember" className="flex items-center gap-2 cursor-pointer select-none">
               <input
                 id="add-remember"
