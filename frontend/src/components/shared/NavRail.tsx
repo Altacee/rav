@@ -124,9 +124,15 @@ export function NavRail() {
   return (
     <Tooltip.Provider delayDuration={400}>
       <div className="relative hidden md:flex h-full w-14 flex-col items-center border-r border-border bg-sidebar py-3">
-        {/* Logo */}
+        {/* The altacee mark: a square gold tile with the grotesque A, the same
+            one the sign-in screen and the favicon use. */}
         <div className="mb-4 flex size-10 items-center justify-center">
-          <span className="text-lg font-bold text-primary">r.</span>
+          <div
+            aria-label="Altacee Mail"
+            className="flex size-8 select-none items-center justify-center bg-primary text-sm font-black text-primary-foreground"
+          >
+            A
+          </div>
         </div>
 
         {/* Top actions */}
