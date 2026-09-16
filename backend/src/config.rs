@@ -80,6 +80,11 @@ pub struct AppConfig {
     #[serde(default)]
     pub rspamd_url: Option<String>,
 
+    /// Password for rspamd's controller. mailcow keeps it behind
+    /// authentication, so training does nothing without this.
+    #[serde(default)]
+    pub rspamd_password: Option<String>,
+
     /// Allow users to configure their own mail servers.
     /// If false, IMAP_HOST must be configured and users cannot override mail server settings.
     /// SMTP_HOST is optional and falls back to IMAP_HOST when not set.
