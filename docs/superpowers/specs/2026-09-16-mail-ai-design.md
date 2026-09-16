@@ -103,10 +103,20 @@ a paraphrase of the message rather than only its literal words.
 
 ## Where every model call happens — six places
 
-### A. Enrichment (feature 1) — Haiku 4.5, one call per message
+### A. Enrichment (feature 1) — granite4.2:8b locally, Haiku 4.5 as fallback
 
 Triggered by the IMAP IDLE arrival event the sync worker already emits. Input:
-headers plus the first ~1,500 tokens of body with quoted reply chains stripped.
+headers plus the body with quoted reply chains stripped, capped at 1,500 tokens
+(measurement below says the cap almost never binds).
+
+**Local first.** granite4.2:8b scored 4/4 on priority at ~3.5s per message on
+the M4 Pro. At ~20 arrivals/day that is 70 seconds of compute a day, and the
+full 3,578-message backfill is ~3.5 hours — one evening, no bill, and no mail
+body leaves the tailnet. Ollama's `format` parameter takes the same JSON schema,
+so the contract is identical to the hosted path.
+
+Hosted Haiku 4.5 stays as the fallback for when the local host is asleep or
+behind, via the same schema. Both paths, one prompt, one `prompt_version`.
 Output via `output_config.format`, `type: json_schema`, `strict: true` — GA, no
 beta header, Haiku 4.5 supported.
 
@@ -144,9 +154,15 @@ reads. `sender_stats` exists to capture it.
 
 Tantivy More-Like-This over the summary and entity fields, unioned with
 deterministic joins: same thread, shared `References`/`In-Reply-To` (rav already
-parses all three), same sender, entity overlap. Add embeddings only if a
-hand-labelled recall measurement says the deterministic version is insufficient
-— note that Anthropic sells no embedding model, so vectors mean a second vendor.
+parses all three), same sender, entity overlap.
+
+The "vectors mean a second vendor" caution is **withdrawn**: `nomic-embed-text`
+is already on the server at 100.84.210.54, returning 768 dimensions in 178ms.
+Embedding the whole corpus is ~11 minutes and costs nothing. Store the vectors
+as blobs beside the enrichment row and brute-force cosine in Rust — at ~138
+messages per mailbox that is a scan, not a vector database. Still measure recall
+on the deterministic joins first; the point is only that adding vectors no longer
+costs a vendor relationship.
 
 ### D. Ask-your-mail (feature 4) — Sonnet 5, one turn, two tools
 
@@ -211,13 +227,31 @@ Auto-filing precision and recall are measurable across all 3,578 messages with
 zero annotation, before any UI exists. Nothing else here offers a labelled eval
 for free, and it is the gate on whether the rest is worth building.
 
-**Model choice is measured, not priced.** A first test of Haiku 4.5 on six
-messages with real senders and subjects from our own inbox (bodies
-approximated): priority correct 6/6, including both traps — an expiring API key
-and a colleague's contract request marked `needs_reply`, an SEO crawl and a
-promotion not. Entities accurate, with one embellishment: "normally ₹11,999"
-came back as `₹11,999/year`. The prompt must forbid unit inference. The real
-gate is ~50 hand-labelled messages from our own corpus.
+**Model choice is measured, not priced.** Four candidates were run on the same
+messages (real senders and subjects from our own inbox, bodies approximated),
+scored on `priority`, which is the axis triage lives on:
+
+| Model | Where | priority | Speed | Notes |
+|---|---|---|---|---|
+| Haiku 4.5 | hosted | 6/6 | ~1s | rendered "normally ₹11,999" as `₹11,999/year` |
+| qwen3.8:27b-mlx | server 100.84.210.54 | 3/3 | 12s warm, 19.5s cold load | schema-valid JSON |
+| **granite4.2:8b** | M4 Pro laptop | **4/4** | 3.5s (~38 tok/s) | normalised `INR 2,50,000` to `250000` |
+| granite4.2:3b | M4 Pro laptop | **1/4** | 2s (~73 tok/s) | rejected |
+
+granite4.2:3b marked *everything* `needs_reply`, including an automated crawl
+report and a promotion, and invented an amount ("7,000+", the course count from
+the Coursera body). A triage that flags everything is identical to no triage.
+**Rejected on evidence, not on size.**
+
+Every surviving model needs the same two prompt rules: do not infer units, and
+do not strip them either. The `relationship` axis is the weakest across all of
+them (Anthropic came back `client` where `vendor` is right) — which is fine,
+because it is mostly derivable from the sender domain, so the code decides it
+and the model only breaks ties.
+
+**This is a fail-fast screen, not a pass.** Four messages can disqualify a model;
+they cannot qualify one. The real gate remains ~50 hand-labelled messages from
+our own corpus, plus the free auto-filing eval below.
 
 ## Money, at our volume
 
@@ -231,8 +265,14 @@ gate is ~50 hand-labelled messages from our own corpus.
 | Drafting, 10/day | Sonnet 5 | ~$3.00/mo |
 | | | **~$5 once, ~$12/mo** |
 
-Assumes 1,500 in / 250 out for enrichment, 8k / 500 for Q&A, 3k / 400 for
-drafts — assumed, not measured (see Open questions). Rates from
+**Measured 2026-09-16**, in-cluster over the cached corpus (2,247 rows, 894 with
+bodies — rav caches a body when a message is opened, so this samples *read*
+mail): body text with quotes stripped is **244 chars median, 1,495 mean**, which
+is roughly **373 input tokens mean**, 61 median, 1,546 at p90. The original
+1,500-token assumption was ~4x high, so the table above is conservative: the
+backfill is ~$3.70 rather than $4.92 and ongoing enrichment ~$1.25/month — and
+both go to zero if enrichment runs locally. Q&A and drafting figures (8k/500 and
+3k/400) remain assumptions. Rates from
 [pricing](https://platform.claude.com/docs/en/about-claude/pricing). Two known
 low biases: structured outputs inject extra system tokens, and any tool present
 adds 496–588 tokens on Haiku 4.5. The conclusion survives a 3× error.
@@ -269,6 +309,17 @@ problem, on their own credentials, with no bodies leaving our infrastructure. It
 does not cover 1, 2 or 6, which need server-side enrichment. It belongs
 alongside this design, not instead of it.
 
+## The hardware we actually have
+
+- **100.84.210.54** — ollama, always reachable over the tailnet. Holds
+  `qwen3.8:27b-mlx` (correct on the enrichment task, 12s/message) and two
+  embedding models, `nomic-embed-text` (768d, 178ms) and `nomic-embed-text-v2-moe`.
+- **This M4 Pro laptop, 24GB** — ollama, now holding `granite4.2:8b` and `:3b`.
+  Fastest of the local options at ~38 tok/s for the 8B, but it sleeps.
+- **100.65.129.88 (VM 407)** — the host litellm's `extract-local` routes point
+  at. Currently stopped; the litellm config comment says so.
+- **The cluster** — no GPU. Enrichment cannot run next to the mail server.
+
 ## Build order
 
 1. Enrichment schema + Haiku batch backfill (~$5, one day). Nothing works without it.
@@ -281,11 +332,13 @@ alongside this design, not instead of it.
 
 ## Open questions — decisions, not details
 
-1. **May mail bodies leave our infrastructure, and whose?** We sell self-hosted
-   mailcow. Hosted-by-default, opt-in per mailbox, or local-only for client
-   deployments? The two local models behind litellm could plausibly do
-   enrichment, which removes the question for the highest-volume call. **Not yet
-   decided.**
+1. **Where does local enrichment run?** The original question — may mail bodies
+   leave our infrastructure — now has a demonstrated third answer: they need not.
+   granite4.2:8b handles enrichment locally at 4/4 on priority. What is undecided
+   is *which machine*: the M4 Pro laptop enriches only while it is awake, which
+   is not an arrival-time path; the server at 100.84.210.54 already runs ollama
+   and holds the embedding models; the cluster has no GPU. **Decide the host, not
+   the principle.**
 2. **One corpus or 26 tenants?** Blocks features 3 and 4; it is an access-control
    decision, not a retrieval one. Microsoft's semantic index refuses to cross
    mailbox boundaries, honouring "the user identity-based access boundary". The
@@ -298,15 +351,21 @@ alongside this design, not instead of it.
 
 ## Unverified
 
-- **Whether litellm passes `output_config.format` through to Anthropic.** One
-  curl settles it. Separately: the Batch API is a different route
+- **Whether litellm passes `output_config.format` through to Anthropic.** Tested
+  2026-09-16 and still unresolved, for two reasons that matter on their own:
+  the `ai` namespace NetworkPolicy (`ingress-from-traefik-and-meet`) does not
+  admit `rav`, so the mail backend cannot reach litellm at all today; and the
+  Anthropic key behind litellm currently returns "Your credit balance is too low
+  to access the Anthropic API", which means every Anthropic-routed model in the
+  estate is failing, not just this test. Separately: the Batch API is a different route
   (`/v1/messages/batches`), not a Messages parameter, so a
   chat-completions-shaped proxy cannot express it — **the backfill almost
   certainly goes direct regardless**, which means a second key and a second
   egress path currently booked at zero.
-- **Tokens per message is a guess.** 1,500/250 is assumed. The messages are in
-  SQLite; tokenising them is an afternoon and it is the input to every number
-  above.
+- **Tokens per message, for the read-mail sample only.** Now measured (373 mean)
+  but over the 894 messages with cached bodies, which are the ones somebody
+  opened. A full-corpus figure needs an IMAP app password for a mailbox or two,
+  after which the same in-cluster job prints aggregates only.
 - **Haiku 4.5's abstention behaviour.** The "Claude abstains rather than
   fabricates" finding covers Opus 4, Sonnet 4/3.7/3.5 and Haiku 3.5 — not Haiku
   4.5 or Sonnet 5, neither of which was in that 18-model set.
