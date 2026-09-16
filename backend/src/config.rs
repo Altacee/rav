@@ -85,6 +85,15 @@ pub struct AppConfig {
     #[serde(default)]
     pub rspamd_password: Option<String>,
 
+    /// Base URL of mailcow's admin API, e.g. `https://ryuvzdff.altacee.com`.
+    /// Unset means every mailcow-derived convenience is simply absent.
+    #[serde(default)]
+    pub mailcow_api_url: Option<String>,
+
+    /// mailcow API key. Read-only is enough for seeding send-as identities.
+    #[serde(default)]
+    pub mailcow_api_key: Option<String>,
+
     /// Allow users to configure their own mail servers.
     /// If false, IMAP_HOST must be configured and users cannot override mail server settings.
     /// SMTP_HOST is optional and falls back to IMAP_HOST when not set.

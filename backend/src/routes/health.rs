@@ -64,6 +64,8 @@ mod tests {
             allow_custom_mail_servers: true,
             rspamd_url: None,
             rspamd_password: None,
+            mailcow_api_url: None,
+            mailcow_api_key: None,
             link_proxy_enabled: false,
             webauthn_rp_id: None,
             webauthn_rp_origin: None,

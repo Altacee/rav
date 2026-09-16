@@ -9,6 +9,7 @@ mod folder_cipher;
 mod imap;
 mod link_proxy;
 mod mail_transport;
+mod mailcow;
 mod mfa;
 mod sieve;
 mod smtp;
