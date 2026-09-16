@@ -94,6 +94,21 @@ pub struct AppConfig {
     #[serde(default)]
     pub mailcow_api_key: Option<String>,
 
+    /// 32 bytes of base64 that seal stored push credentials. Unset means push
+    /// is off: nothing is stored, nothing is decrypted.
+    #[serde(default)]
+    pub push_credential_key: Option<String>,
+
+    /// The VAPID private key push messages are signed with, 32 bytes of base64.
+    #[serde(default)]
+    pub push_vapid_key: Option<String>,
+
+    /// The VAPID `sub` claim. An https URL by default rather than a mailto:, so
+    /// no personal address is baked into every notification. Falls back to
+    /// WEBAUTHN_RP_ORIGIN.
+    #[serde(default)]
+    pub push_vapid_subject: Option<String>,
+
     /// Allow users to configure their own mail servers.
     /// If false, IMAP_HOST must be configured and users cannot override mail server settings.
     /// SMTP_HOST is optional and falls back to IMAP_HOST when not set.

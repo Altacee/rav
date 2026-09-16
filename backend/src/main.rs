@@ -14,6 +14,7 @@ mod mfa;
 mod sieve;
 mod smtp;
 mod auth;
+mod push;
 mod realtime;
 mod routes;
 mod search;
@@ -152,6 +153,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // Push: keeps IDLE running for mailboxes that asked for notifications, so
+    // new mail reaches a closed browser. Inert unless PUSH_CREDENTIAL_KEY and
+    // PUSH_VAPID_KEY are both set.
+    let push_wake = push::worker::spawn(push::worker::PushContext {
+        config: config.clone(),
+        imap_client: imap_client.clone(),
+        db_pool_manager: db_pool_manager.clone(),
+        transport: transport.clone(),
+        event_bus: event_bus.clone(),
+        idle_manager: idle_manager.clone(),
+        sync_worker_manager: sync_worker_manager.clone(),
+        http: http_client.clone(),
+    });
+
     // Build the application router with auth, session, and static file serving.
     let app = routes::create_router(AppServices {
         config: config.clone(),
@@ -170,6 +185,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         link_proxy_secret,
         draft_locks: Arc::new(routes::drafts::DraftLocks::new()),
         db_pool_manager,
+        push_wake,
     });
 
     // Bind to the configured host and port.
