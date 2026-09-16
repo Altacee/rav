@@ -126,6 +126,12 @@ pub struct AppConfig {
     #[serde(default = "default_sieve_port")]
     pub sieve_port: u16,
 
+    /// Allow `AUTHENTICATE` on an unencrypted ManageSieve stream. Only ever
+    /// true for a loopback test server: mailcow requires STARTTLS, and a
+    /// plaintext login would put a mailbox password on the public internet.
+    #[serde(default)]
+    pub sieve_allow_plaintext: bool,
+
     /// Max concurrent SQLite connections held per user in the connection pool.
     #[serde(default = "default_db_pool_max_connections_per_user")]
     pub db_pool_max_connections_per_user: u32,

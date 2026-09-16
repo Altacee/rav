@@ -30,15 +30,21 @@ struct OwnedMessageContext {
 
 /// Spawn a background task to push the given filter set to ManageSieve.
 /// No-op if sieve_host is not configured. Failures are logged, not propagated.
-fn push_sieve_async(config: &Arc<AppConfig>, session: &SessionState, rules: Vec<db::filters::FilterRule>) {
+fn push_sieve_async(
+    config: &Arc<AppConfig>,
+    transport: &Arc<MailTransport>,
+    session: &SessionState,
+    rules: Vec<db::filters::FilterRule>,
+) {
     if config.sieve_host.is_none() {
         return;
     }
     let config = Arc::clone(config);
+    let transport = Arc::clone(transport);
     let email = session.email.clone();
     let password = session.password.clone();
     tokio::spawn(async move {
-        crate::sieve::push_filters(&config, &email, &password, &rules).await;
+        crate::sieve::push_filters(&config, &transport, &email, &password, &rules).await;
     });
 }
 
@@ -59,6 +65,7 @@ pub async fn list_filters_handler(
 pub async fn create_filter_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
+    Extension(transport): Extension<Arc<MailTransport>>,
     Extension(db_pool_manager): Extension<Arc<db::pool::DbPoolManager>>,
     Json(body): Json<CreateFilterRule>,
 ) -> Result<Response, AppError> {
@@ -69,7 +76,7 @@ pub async fn create_filter_handler(
     })
     .await
     .map_err(AppError::BadRequest)?;
-    push_sieve_async(&config, &session, rules);
+    push_sieve_async(&config, &transport, &session, rules);
     Ok(Json(rule).into_response())
 }
 
@@ -77,6 +84,7 @@ pub async fn create_filter_handler(
 pub async fn update_filter_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
+    Extension(transport): Extension<Arc<MailTransport>>,
     Extension(db_pool_manager): Extension<Arc<db::pool::DbPoolManager>>,
     Path(id): Path<String>,
     Json(body): Json<UpdateFilterRule>,
@@ -89,7 +97,7 @@ pub async fn update_filter_handler(
     .await
     .map_err(AppError::BadRequest)?;
     let rule = rule.ok_or_else(|| AppError::NotFound("Filter rule not found".to_string()))?;
-    push_sieve_async(&config, &session, rules);
+    push_sieve_async(&config, &transport, &session, rules);
     Ok(Json(rule).into_response())
 }
 
@@ -97,6 +105,7 @@ pub async fn update_filter_handler(
 pub async fn delete_filter_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
+    Extension(transport): Extension<Arc<MailTransport>>,
     Extension(db_pool_manager): Extension<Arc<db::pool::DbPoolManager>>,
     Path(id): Path<String>,
 ) -> Result<Response, AppError> {
@@ -110,7 +119,7 @@ pub async fn delete_filter_handler(
     if !deleted {
         return Err(AppError::NotFound("Filter rule not found".to_string()));
     }
-    push_sieve_async(&config, &session, rules);
+    push_sieve_async(&config, &transport, &session, rules);
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
 }
 
@@ -124,6 +133,7 @@ pub struct ReorderBody {
 pub async fn reorder_filters_handler(
     Extension(session): Extension<SessionState>,
     Extension(config): Extension<Arc<AppConfig>>,
+    Extension(transport): Extension<Arc<MailTransport>>,
     Extension(db_pool_manager): Extension<Arc<db::pool::DbPoolManager>>,
     Json(body): Json<ReorderBody>,
 ) -> Result<Response, AppError> {
@@ -133,7 +143,7 @@ pub async fn reorder_filters_handler(
     })
     .await
     .map_err(AppError::InternalError)?;
-    push_sieve_async(&config, &session, rules.clone());
+    push_sieve_async(&config, &transport, &session, rules.clone());
     Ok(Json(serde_json::json!({ "rules": rules })).into_response())
 }
 
