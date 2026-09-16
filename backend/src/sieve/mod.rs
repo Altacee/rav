@@ -9,16 +9,19 @@ use std::sync::Arc;
 use crate::config::AppConfig;
 use crate::db::filters::FilterRule;
 
-/// Push all rules to ManageSieve if sieve_host is configured. Best-effort: logs on failure.
-pub async fn push_filters(
+/// Publish the whole Sieve state — filter rules and the out-of-office
+/// responder — if sieve_host is configured. Dovecot activates one script per
+/// user, so both always travel together. Best-effort: logs on failure.
+pub async fn push_state(
     config: &Arc<AppConfig>,
     transport: &crate::mail_transport::MailTransport,
     email: &str,
     password: &str,
     rules: &[FilterRule],
+    vacation: Option<&crate::db::vacation::VacationResponder>,
 ) {
     let Some(ref host) = config.sieve_host else { return; };
-    let script = generator::generate_sieve_script(rules);
+    let script = generator::generate_script(rules, vacation);
     if let Err(e) = client::push_script(
         client::SieveTarget {
             host,
@@ -33,6 +36,6 @@ pub async fn push_filters(
     )
     .await
     {
-        tracing::warn!(error = %e, "ManageSieve push failed - filters will apply via IDLE only");
+        tracing::warn!(error = %e, "ManageSieve push failed - filters and vacation apply in-app only");
     }
 }

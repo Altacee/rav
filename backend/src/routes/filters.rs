@@ -33,6 +33,7 @@ struct OwnedMessageContext {
 fn push_sieve_async(
     config: &Arc<AppConfig>,
     transport: &Arc<MailTransport>,
+    db_pool_manager: &Arc<db::pool::DbPoolManager>,
     session: &SessionState,
     rules: Vec<db::filters::FilterRule>,
 ) {
@@ -41,10 +42,20 @@ fn push_sieve_async(
     }
     let config = Arc::clone(config);
     let transport = Arc::clone(transport);
+    let db_pool_manager = Arc::clone(db_pool_manager);
+    let user_hash = session.user_hash.clone();
     let email = session.email.clone();
     let password = session.password.clone();
     tokio::spawn(async move {
-        crate::sieve::push_filters(&config, &transport, &email, &password, &rules).await;
+        // The uploaded script carries both halves of the state, so a filter
+        // edit must not silently drop an active out-of-office rule.
+        let vacation = db::pool::with_user_db(&db_pool_manager, &user_hash, |conn| {
+            db::vacation::get_vacation(conn)
+        })
+        .await
+        .ok();
+        crate::sieve::push_state(&config, &transport, &email, &password, &rules, vacation.as_ref())
+            .await;
     });
 }
 
@@ -76,7 +87,7 @@ pub async fn create_filter_handler(
     })
     .await
     .map_err(AppError::BadRequest)?;
-    push_sieve_async(&config, &transport, &session, rules);
+    push_sieve_async(&config, &transport, &db_pool_manager, &session, rules);
     Ok(Json(rule).into_response())
 }
 
@@ -97,7 +108,7 @@ pub async fn update_filter_handler(
     .await
     .map_err(AppError::BadRequest)?;
     let rule = rule.ok_or_else(|| AppError::NotFound("Filter rule not found".to_string()))?;
-    push_sieve_async(&config, &transport, &session, rules);
+    push_sieve_async(&config, &transport, &db_pool_manager, &session, rules);
     Ok(Json(rule).into_response())
 }
 
@@ -119,7 +130,7 @@ pub async fn delete_filter_handler(
     if !deleted {
         return Err(AppError::NotFound("Filter rule not found".to_string()));
     }
-    push_sieve_async(&config, &transport, &session, rules);
+    push_sieve_async(&config, &transport, &db_pool_manager, &session, rules);
     Ok(Json(serde_json::json!({ "status": "ok" })).into_response())
 }
 
@@ -143,7 +154,7 @@ pub async fn reorder_filters_handler(
     })
     .await
     .map_err(AppError::InternalError)?;
-    push_sieve_async(&config, &transport, &session, rules.clone());
+    push_sieve_async(&config, &transport, &db_pool_manager, &session, rules.clone());
     Ok(Json(serde_json::json!({ "rules": rules })).into_response())
 }
 
