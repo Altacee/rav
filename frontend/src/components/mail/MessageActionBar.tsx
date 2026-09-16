@@ -30,6 +30,8 @@ import { Button } from "@/components/ui/button";
 import { ActionTooltip, ActionTooltipProvider } from "./ActionTooltip";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { useReportSpam, useReportHam } from "@/hooks/useSpamReport";
+import { useFolders } from "@/hooks/useFolders";
+import { resolveJunkFolderName } from "@/lib/folders";
 import { useAuthStore } from "@/stores/useAuthStore";
 import {
   extractHeader,
@@ -77,6 +79,10 @@ export function MessageActionBar() {
   const updateFlags = useUpdateFlags();
   const moveMessage = useMoveMessage();
   const deleteMessage = useDeleteMessage();
+  const { data: foldersData } = useFolders();
+  // The server's name for the junk folder, which is not the name the sidebar
+  // shows: FolderTree displays "Spam" for a folder mailcow calls "Junk".
+  const junkFolder = resolveJunkFolderName(foldersData?.folders);
   const reportSpam = useReportSpam();
   const reportHam = useReportHam();
 
@@ -275,18 +281,21 @@ export function MessageActionBar() {
   };
 
   const handleJunk = () => {
-    if (!data) return;
+    if (!data || !junkFolder) return;
     const uid = data.uid;
     const folder = activeFolder;
     reportSpam.mutate({ folder, uid });
-    moveMessage.mutate({ fromFolder: folder, toFolder: "Spam", uid });
+    // Moving into the server's junk folder is what trains the filter: mailcow
+    // runs report-spam.sieve on a copy into it. Targeting the display name
+    // instead filed nothing and trained nothing.
+    moveMessage.mutate({ fromFolder: folder, toFolder: junkFolder, uid });
   };
 
   const handleNotJunk = () => {
-    if (!data) return;
+    if (!data || !junkFolder) return;
     const uid = data.uid;
-    reportHam.mutate({ folder: "Spam", uid });
-    moveMessage.mutate({ fromFolder: "Spam", toFolder: "INBOX", uid });
+    reportHam.mutate({ folder: junkFolder, uid });
+    moveMessage.mutate({ fromFolder: junkFolder, toFolder: "INBOX", uid });
   };
 
   const handleToggleStar = () => {
@@ -453,7 +462,7 @@ export function MessageActionBar() {
       )}
 
       {/* Junk / Not Junk */}
-      {activeFolder === "Spam" ? (
+      {junkFolder && activeFolder === junkFolder ? (
         <ActionTooltip label="Not junk - move to Inbox">
           <Button aria-label="Not junk" variant="ghost" size="sm" className="shrink-0 gap-1.5" disabled={disabled} onClick={handleNotJunk}>
             <ShieldCheck className="size-4" />
