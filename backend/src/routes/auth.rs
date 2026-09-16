@@ -491,6 +491,25 @@ async fn create_login_session(
         return internal_error_response();
     }
 
+    // Seed send-as identities from mailcow's alias list, in the background: a
+    // slow or unreachable admin API must not delay a sign-in, and the seeding
+    // is idempotent, so doing it on every login is harmless.
+    if let (Some(url), Some(key)) = (config.mailcow_api_url.clone(), config.mailcow_api_key.clone())
+    {
+        let db_pool_manager = Arc::clone(db_pool_manager);
+        let user_hash = user_hash.clone();
+        let email = body.email.clone();
+        tokio::spawn(async move {
+            let api = crate::mailcow::MailcowApi::new(reqwest::Client::new(), url, key);
+            let aliases = crate::mailcow::aliases_for(&api, &email).await;
+            match crate::mailcow::seed_identities(&db_pool_manager, &user_hash, &aliases).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(count = n, "seeded send-as identities from mailcow"),
+                Err(e) => tracing::warn!(error = %e, "could not seed identities from mailcow"),
+            }
+        });
+    }
+
     if let Some(ref browser_id) = body.browser_id {
         let existing_accounts = store.get_browser_accounts(browser_id);
         let duplicate = existing_accounts
