@@ -176,6 +176,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (29, include_str!("../../migrations/V029__filter_rules_v2.sql")),
     (30, include_str!("../../migrations/V030__draft_staging.sql")),
     (31, include_str!("../../migrations/V031__outbox.sql")),
+    (32, include_str!("../../migrations/V032__push.sql")),
 ];
 
 #[cfg(test)]

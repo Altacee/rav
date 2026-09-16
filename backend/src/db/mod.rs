@@ -15,4 +15,5 @@ pub mod outbox;
 pub mod pgp;
 pub mod pool;
 pub mod tags;
+pub mod push;
 pub mod vacation;
