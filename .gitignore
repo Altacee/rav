@@ -99,7 +99,8 @@ build/
 # =============================================================================
 _bmad/
 _bmad-output/
-docs/
+docs/*
+!docs/superpowers/
 
 # Extras
 frontend/public/stickers
@@ -107,3 +108,6 @@ frontend/public/stickers/manifest.json
 
 # Debugging files
 debugging/
+
+# Our own specs are tracked; upstream ignores docs/ wholesale.
+!docs/superpowers/
