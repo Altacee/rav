@@ -1,5 +1,6 @@
 mod client;
 mod generator;
+mod protocol;
 
 pub use generator::is_sieve_capable;
 
