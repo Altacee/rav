@@ -221,11 +221,33 @@ Trash" is the whole attack:
 
 ## Evaluation
 
-**The free eval, and the second thing we build.** mailcow already holds ground
-truth: existing folder placement and existing Sieve rules *are* labels.
-Auto-filing precision and recall are measurable across all 3,578 messages with
-zero annotation, before any UI exists. Nothing else here offers a labelled eval
-for free, and it is the gate on whether the rest is worth building.
+**The free eval — but not the one this document first claimed.** The original
+plan was to score auto-filing against existing folder placement, on the
+assumption that people file their mail. Measured on `aditya@altacee.dev`, they
+do not:
+
+| | |
+|---|---|
+| INBOX | 2,111 |
+| Junk | 109 |
+| Sent | 23 |
+| Archive | **1** |
+| Ever replied to (`\Answered`) | **5** (0.2%) |
+| Read | 50% |
+
+94% of the mailbox has never moved and 99.8% has never been replied to. Folder
+placement cannot label auto-filing when nothing is filed, and five `\Answered`
+messages cannot validate a "needs reply" classifier. **The zero-annotation eval
+survives in a different form:** Junk (109) against INBOX (2,111) is a real
+spam/ham set, sorted by a human and by rspamd, and it tests whether enrichment
+can separate junk from real mail.
+
+Two consequences. First, auto-filing (feature 6) is speculative for this
+mailbox — it automates a habit its owner does not have — so it drops below
+triage and retrieval in the build order. Second, in a mailbox where almost
+nothing moves and almost nothing gets a reply, **triage is the entire value**:
+deciding what deserves attention, not automating filing. Measure a second
+mailbox before treating either conclusion as general; this is one data point.
 
 **Model choice is measured, not priced.** Four candidates were run on the same
 messages (real senders and subjects from our own inbox, bodies approximated),
@@ -265,14 +287,27 @@ our own corpus, plus the free auto-filing eval below.
 | Drafting, 10/day | Sonnet 5 | ~$3.00/mo |
 | | | **~$5 once, ~$12/mo** |
 
-**Measured 2026-09-16**, in-cluster over the cached corpus (2,247 rows, 894 with
-bodies — rav caches a body when a message is opened, so this samples *read*
-mail): body text with quotes stripped is **244 chars median, 1,495 mean**, which
-is roughly **373 input tokens mean**, 61 median, 1,546 at p90. The original
-1,500-token assumption was ~4x high, so the table above is conservative: the
-backfill is ~$3.70 rather than $4.92 and ongoing enrichment ~$1.25/month — and
-both go to zero if enrichment runs locally. Q&A and drafting figures (8k/500 and
-3k/400) remain assumptions. Rates from
+**Measured 2026-09-17** over `aditya@altacee.dev` (2,244 messages, the largest
+mailbox), 320 sampled across INBOX, Junk and Sent, fetched with `BODY.PEEK` so
+nothing was marked read, and parsed MIME-aware — text/plain where present, else
+text/html with tags stripped, quoted reply chains removed:
+
+| | tokens |
+|---|---|
+| median | 398 |
+| mean | 700 |
+| p90 | 1,879 |
+| mean with a 1,500-token cap | **585** (cap binds on 18% of messages) |
+
+So ~900 input tokens per call including prompt overhead, and ~250 out. Backfill
+~$3.85, ongoing ~$1.29/month on Haiku — or zero locally. Q&A and drafting
+figures (8k/500 and 3k/400) remain assumptions.
+
+**Two earlier figures in this document were wrong and are withdrawn.** 373
+tokens came from rav's SQLite cache, which holds plain-text bodies only for
+messages someone opened. 6,560 came from `BODY[TEXT]`, which on multipart mail
+includes base64 attachment payloads — it measured attachments, not reading. They
+bracket the truth, which is a coincidence and not a method. Rates from
 [pricing](https://platform.claude.com/docs/en/about-claude/pricing). Two known
 low biases: structured outputs inject extra system tokens, and any tool present
 adds 496–588 tokens on Haiku 4.5. The conclusion survives a 3× error.
@@ -322,13 +357,17 @@ alongside this design, not instead of it.
 
 ## Build order
 
-1. Enrichment schema + Haiku batch backfill (~$5, one day). Nothing works without it.
-2. Auto-filing eval against existing mailcow folders. Free, no UI. **The gate.**
-3. Triage view + threshold button. Zero model calls, immediate value.
-4. Reply drafting (on demand).
-5. Ask-your-mail.
+1. Enrichment schema + backfill (local, an evening; or ~$3.85 on Haiku Batch).
+   Nothing works without it.
+2. Spam/ham eval: Junk vs INBOX, zero annotation. **The gate** — if enrichment
+   cannot separate those, nothing downstream is worth building.
+3. Triage view + threshold button. Zero model calls, and on this evidence it is
+   the feature that carries the product.
+4. Ask-your-mail.
+5. Reply drafting (on demand).
 6. Relatedness.
-7. Auto-filing proposals → Sieve.
+7. Auto-filing proposals → Sieve. Demoted: on the one mailbox measured, there is
+   no filing habit to automate. Revisit if a second mailbox says otherwise.
 
 ## Open questions — decisions, not details
 
