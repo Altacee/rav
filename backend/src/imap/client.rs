@@ -213,7 +213,8 @@ pub trait ImapClient: Send + Sync {
         creds: &ImapCredentials,
         folder: &str,
         since_modseq: u64,
-    ) -> Result<(Vec<(u32, Vec<String>)>, u64), ImapError>;
+        uid_validity: u32,
+    ) -> Result<ChangedFlags, ImapError>;
 
     /// Fetch mailbox quota via IMAP GETQUOTAROOT.
     /// Returns `None` if the server doesn't support quotas.
@@ -244,6 +245,86 @@ pub trait ImapClient: Send + Sync {
         folder: &str,
         uid: u32,
     ) -> Result<Vec<u8>, ImapError>;
+}
+
+/// What changed in a folder since a given MODSEQ.
+///
+/// `vanished` distinguishes two things a count never could: `Some(uids)` is the
+/// server telling us exactly what was removed (QRESYNC), while `None` means it
+/// told us nothing and the caller must fall back to comparing counts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangedFlags {
+    pub changed: Vec<(u32, Vec<String>)>,
+    pub vanished: Option<Vec<u32>>,
+    pub highest_modseq: u64,
+}
+
+
+/// One QRESYNC round trip: `ENABLE QRESYNC`, then a SELECT that asks the server
+/// to report both changed flags and vanished UIDs since `since_modseq`.
+///
+/// Returns `None` for every failure mode, which means "use the CONDSTORE path"
+/// — a server without the capability, a command it refuses, or a read that
+/// stalls must never break a sync.
+async fn try_qresync(
+    session: &mut crate::imap::session_cache::ImapSession,
+    folder: &str,
+    since_modseq: u64,
+    uid_validity: u32,
+) -> Option<ChangedFlags> {
+    use async_imap::imap_proto::{AttributeValue, Response};
+
+    session.run_command_and_check_ok("ENABLE QRESYNC").await.ok()?;
+    let req_id = session
+        .run_command(&super::qresync::select_command(folder, uid_validity, since_modseq))
+        .await
+        .ok()?;
+
+    let mut changed: Vec<(u32, Vec<String>)> = Vec::new();
+    let mut vanished: Vec<u32> = Vec::new();
+    let mut highest_modseq = 0u64;
+
+    let collected = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+        loop {
+            let resp = match session.read_response().await {
+                Ok(Some(r)) => r,
+                _ => return false,
+            };
+            match resp.parsed() {
+                Response::Vanished { uids, .. } => {
+                    vanished.extend(super::qresync::expand_ranges(uids));
+                }
+                Response::Fetch(_, attrs) => {
+                    let mut uid = None;
+                    let mut flags = Vec::new();
+                    for attr in attrs {
+                        match attr {
+                            AttributeValue::Uid(u) => uid = Some(*u),
+                            AttributeValue::Flags(f) => {
+                                flags = f.iter().map(|c| c.to_string()).collect();
+                            }
+                            AttributeValue::ModSeq(m) => highest_modseq = highest_modseq.max(*m),
+                            _ => {}
+                        }
+                    }
+                    if let Some(uid) = uid {
+                        changed.push((uid, flags));
+                    }
+                }
+                Response::Done { tag, status, .. } if tag == &req_id => {
+                    return matches!(status, async_imap::imap_proto::Status::Ok);
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+
+    if !collected {
+        return None;
+    }
+    Some(ChangedFlags { changed, vanished: Some(vanished), highest_modseq })
 }
 
 // ---------------------------------------------------------------------------
@@ -1214,8 +1295,22 @@ impl ImapClient for RealImapClient {
         creds: &ImapCredentials,
         folder: &str,
         since_modseq: u64,
-    ) -> Result<(Vec<(u32, Vec<String>)>, u64), ImapError> {
+        uid_validity: u32,
+    ) -> Result<ChangedFlags, ImapError> {
         let mut session = self.cache.acquire(creds, &self.transport.imap_connect_host, &self.transport.imap_connector).await?;
+
+        // QRESYNC folds "what changed" and "what vanished" into the SELECT, so
+        // deletions arrive as an explicit list instead of being inferred from a
+        // message count. Anything unexpected — no capability, an unparsed
+        // response, a read that stalls — falls through to the CONDSTORE path
+        // below, which is what shipped before this.
+        if uid_validity > 0
+            && since_modseq > 0
+            && let Some(delta) = try_qresync(&mut session, folder, since_modseq, uid_validity).await
+        {
+            self.cache.release(creds, session);
+            return Ok(delta);
+        }
 
         let mailbox = session
             .select_condstore(folder)
@@ -1242,7 +1337,7 @@ impl ImapClient for RealImapClient {
         };
 
         self.cache.release(creds, session);
-        Ok((items, new_modseq))
+        Ok(ChangedFlags { changed: items, vanished: None, highest_modseq: new_modseq })
     }
 
     async fn get_quota(

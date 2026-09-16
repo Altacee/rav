@@ -357,8 +357,14 @@ async fn sync_condstore(
     let SyncCtx { user_hash, creds, imap_client, event_bus, search_engine, db_pool_manager } = ctx;
     let mut folder_changed = false;
 
-    // Fetch only messages whose flags changed since our cached modseq.
-    let (changed, new_modseq) = match imap_client.fetch_changed_flags(creds, folder_name, cached_modseq).await {
+    // Fetch only messages whose flags changed since our cached modseq. With
+    // QRESYNC the server also names what vanished; without it, `vanished` is
+    // None and the count comparison below is all we have.
+    let crate::imap::client::ChangedFlags { changed, vanished, highest_modseq: new_modseq } =
+        match imap_client
+            .fetch_changed_flags(creds, folder_name, cached_modseq, status.uid_validity)
+            .await
+        {
         Ok(result) => result,
         Err(e) => {
             tracing::debug!(
@@ -398,7 +404,38 @@ async fn sync_condstore(
     .await
     .map_err(|e| format!("DB error: {e}"))?;
 
-    if status.exists < cached_count {
+    // The server told us exactly what went: delete those UIDs and skip the
+    // heuristic entirely. This is the case a count cannot see — one message
+    // deleted and one delivered between syncs leaves `exists` unchanged.
+    if let Some(ref vanished_uids) = vanished
+        && !vanished_uids.is_empty()
+    {
+            let deleted = db::pool::with_user_db(db_pool_manager, user_hash, {
+                let folder_name = folder_name.to_string();
+                let vanished_uids = vanished_uids.clone();
+                move |conn| {
+                    let mut any = false;
+                    for uid in &vanished_uids {
+                        if db::messages::delete_message(conn, &folder_name, *uid).is_ok() {
+                            any = true;
+                        }
+                    }
+                    Ok(any)
+                }
+            })
+            .await
+            .map_err(|e| format!("DB error: {e}"))?;
+            if deleted {
+                folder_changed = true;
+                tracing::debug!(
+                    folder = %folder_name,
+                    count = vanished_uids.len(),
+                    "Removed vanished messages from cache (QRESYNC path)"
+                );
+        }
+    }
+
+    if vanished.is_none() && status.exists < cached_count {
         // Need to fetch all UIDs to find which ones were deleted.
         if let Ok(imap_state) = imap_client.fetch_uids_and_flags(creds, folder_name).await {
             db::pool::with_user_db(db_pool_manager, user_hash, {
@@ -628,6 +665,43 @@ async fn sync_full(
 
 #[cfg(test)]
 mod tests {
+
+    /// The case a message count cannot see: one message deleted on the server
+    /// and one delivered between syncs, so `exists` is unchanged. QRESYNC names
+    /// the deleted UID explicitly, and it must leave the cache.
+    #[tokio::test]
+    async fn a_vanished_message_is_removed_even_when_the_count_is_unchanged() {
+        let data_dir = TempDir::new().unwrap();
+        let user_hash = seed_user_with_one_message(data_dir.path(), 10).await;
+        let db_pool_manager = test_db_pool_manager(data_dir.path());
+        let creds = test_creds();
+        let event_bus = Arc::new(EventBus::new());
+        let search_engine =
+            Arc::new(crate::search::engine::SearchEngine::new(data_dir.path().to_path_buf()));
+
+        let mock = MockImapClient::new()
+            .with_headers(vec![new_header(2, "Fresh mail", "Dave")])
+            .with_vanished(vec![1])
+            .with_folder_status_extended(FolderStatusExtended {
+                uid_validity: 1,
+                exists: 1,
+                uid_next: 3,
+                unseen: 0,
+                highest_modseq: 20,
+            });
+        let imap_client: Arc<dyn ImapClient> = Arc::new(mock);
+
+        run_sync(SyncCtx { user_hash: &user_hash, creds: &creds, imap_client: imap_client.as_ref(), event_bus: &event_bus, search_engine: &search_engine, db_pool_manager: &db_pool_manager })
+            .await
+            .expect("sync should succeed");
+
+        let gone = db::pool::with_user_db(&db_pool_manager, &user_hash, |conn| {
+            db::messages::get_single_message(conn, "INBOX", 1)
+        })
+        .await
+        .unwrap();
+        assert!(gone.is_none(), "uid 1 vanished on the server and must leave the cache");
+    }
     use super::*;
     use std::sync::Arc;
     use crate::imap::client::mock::MockImapClient;

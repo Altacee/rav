@@ -15,6 +15,7 @@ pub struct MockImapClient {
     folder_status: Mutex<Option<FolderStatus>>,
     folder_status_ext: Mutex<Option<FolderStatusExtended>>,
     should_fail: Mutex<Option<ImapError>>,
+    vanished: Mutex<Option<Vec<u32>>>,
     pub appended: Mutex<Vec<(String, Vec<u8>)>>,
     next_uid: Mutex<u32>,
 }
@@ -29,6 +30,7 @@ impl MockImapClient {
             folder_status: Mutex::new(None),
             folder_status_ext: Mutex::new(None),
             should_fail: Mutex::new(None),
+            vanished: Mutex::new(None),
             appended: Mutex::new(Vec::new()),
             next_uid: Mutex::new(1),
         }
@@ -63,6 +65,15 @@ impl MockImapClient {
     /// Pre-load message bodies that `fetch_body` will match against by UID.
     pub fn with_bodies(self, bodies: Vec<ImapMessageBody>) -> Self {
         *self.bodies.lock().unwrap() = bodies;
+        self
+    }
+
+    /// Pre-load the UIDs `fetch_changed_flags` will report as vanished, as a
+    /// QRESYNC server would. Left unset, the mock reports `None` — "the server
+    /// said nothing" — which is the CONDSTORE case.
+    #[allow(dead_code)]
+    pub fn with_vanished(self, uids: Vec<u32>) -> Self {
+        *self.vanished.lock().unwrap() = Some(uids);
         self
     }
 
@@ -394,14 +405,19 @@ impl ImapClient for MockImapClient {
         _creds: &ImapCredentials,
         _folder: &str,
         _since_modseq: u64,
-    ) -> Result<(Vec<(u32, Vec<String>)>, u64), ImapError> {
+        _uid_validity: u32,
+    ) -> Result<ChangedFlags, ImapError> {
         if let Some(ref err) = *self.should_fail.lock().unwrap() {
             return Err(clone_error(err));
         }
         // In mock, return all headers as "changed" with modseq 0.
         let headers = self.headers.lock().unwrap();
         let items: Vec<(u32, Vec<String>)> = headers.iter().map(|h| (h.uid, h.flags.clone())).collect();
-        Ok((items, 0))
+        Ok(ChangedFlags {
+            changed: items,
+            vanished: self.vanished.lock().unwrap().clone(),
+            highest_modseq: 0,
+        })
     }
 
     async fn get_quota(
@@ -455,6 +471,20 @@ impl ImapClient for MockImapClient {
 
 #[cfg(test)]
 mod tests {
+
+    #[tokio::test]
+    async fn mock_reports_vanished_uids() {
+        let client = MockImapClient::new().with_vanished(vec![4, 5]);
+        let out = client
+            .fetch_changed_flags(&test_creds(), "INBOX", 10, 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            out.vanished,
+            Some(vec![4, 5]),
+            "Some means the server reported; None would mean it said nothing"
+        );
+    }
     use super::*;
 
     /// Convenience helper to build dummy credentials for tests.
