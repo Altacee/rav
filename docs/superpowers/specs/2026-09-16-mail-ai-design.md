@@ -249,31 +249,39 @@ nothing moves and almost nothing gets a reply, **triage is the entire value**:
 deciding what deserves attention, not automating filing. Measure a second
 mailbox before treating either conclusion as general; this is one data point.
 
-**Model choice is measured, not priced.** Four candidates were run on the same
-messages (real senders and subjects from our own inbox, bodies approximated),
-scored on `priority`, which is the axis triage lives on:
+**Model choice is measured, not priced.** Five models, scored 2026-09-17 on two
+sets drawn from `aditya@altacee.dev`: 30 messages sitting in Junk that an early
+model wrongly called `needs_reply`, and 20 internal messages — 18 uptime alerts
+and OTP codes that need no reply, plus 2 that genuinely do (a colleague's
+follow-up and an inbound lead). Same prompt, same schema, same messages.
 
-| Model | Where | priority | Speed | Notes |
-|---|---|---|---|---|
-| Haiku 4.5 | hosted | 6/6 | ~1s | rendered "normally ₹11,999" as `₹11,999/year` |
-| qwen3.8:27b-mlx | server 100.84.210.54 | 3/3 | 12s warm, 19.5s cold load | schema-valid JSON |
-| **granite4.2:8b** | M4 Pro laptop | **4/4** | 3.5s (~38 tok/s) | normalised `INR 2,50,000` to `250000` |
-| granite4.2:3b | M4 Pro laptop | **1/4** | 2s (~73 tok/s) | rejected |
+| model | spam wrongly flagged | false positives | genuine replies caught | speed | host |
+|---|---|---|---|---|---|
+| granite4.2:8b | 30/30 | 18/18 | 2/2 | 7.1s | laptop |
+| gemma4:e4b | 1/30 | 0/18 | 1/2 | 3.3s | RTX 3050 |
+| gemma4:e4b + medium thinking | 0/29 | 0/18 | 1/2 | 13.6s | RTX 3050 |
+| qwen3.5:9b | 0/30 | 0/18 | 1/2 | 4.2s | laptop |
+| **gemma4:12b** | 1/30 | 0/18 | **2/2** | 5.6s | laptop |
+| gpt-5.6-luna | 0/30 | 0/18 | 1/2 | 2.6s | OpenAI |
 
-granite4.2:3b marked *everything* `needs_reply`, including an automated crawl
-report and a promotion, and invented an amount ("7,000+", the course count from
-the Coursera body). A triage that flags everything is identical to no triage.
-**Rejected on evidence, not on size.**
+**gemma4:12b is the only model that does both halves of the job.** Everything
+else either flags everything (granite) or catches only one of the two messages
+that matter. Four of six miss the same one — an inbound lead sent from
+`no-reply@`, which is indistinguishable from an automated notification by
+content alone. That is an argument for sender rules, not for a bigger model.
 
-Every surviving model needs the same two prompt rules: do not infer units, and
-do not strip them either. The `relationship` axis is the weakest across all of
-them (Anthropic came back `client` where `vendor` is right) — which is fine,
-because it is mostly derivable from the sender domain, so the code decides it
-and the model only breaks ties.
+**Thinking is not worth it here.** Medium thinking on e4b bought one marginal
+spam correction for 4x the latency and did not fix the missed lead. On
+gemma4:12b (MLX build) thinking actively breaks structured output — the content
+comes back as `is{"priority": ...}`, which will not parse. Run with
+`think: false`.
 
-**This is a fail-fast screen, not a pass.** Four messages can disqualify a model;
-they cannot qualify one. The real gate remains ~50 hand-labelled messages from
-our own corpus, plus the free auto-filing eval below.
+**Two methodological warnings, both learned the hard way in this evaluation.**
+A 12-message spot check said a prompt change had fixed spam over-flagging; at
+scale it was still 28% wrong. A single probe suggested medium thinking caught
+the inbound lead; the full run showed it did not — the probe used a synthetic
+body. **Single probes and small samples on this task point the wrong way often
+enough to be worthless.** Score the fixed sets or do not claim a result.
 
 ## Money, at our volume
 
