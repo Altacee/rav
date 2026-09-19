@@ -28,6 +28,8 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { AssistantPanel, useAssistantShortcut } from "@/components/assistant/AssistantPanel";
 import { useAssistantStatus } from "@/hooks/useAssistant";
 import { useAssistantStore } from "@/stores/useAssistantStore";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { cn } from "@/lib/utils";
 
 export default function MailPage() {
   const viewMode = useUiStore((s: UiState) => s.viewMode);
@@ -39,6 +41,7 @@ export default function MailPage() {
   const { status: wsStatus, failCount: wsFailCount } = useWebSocket(handleEvent);
   const { enabled: assistantEnabled } = useAssistantStatus();
   const assistantOpen = useAssistantStore((s) => s.open);
+  const isMobile = useIsMobile();
   useAssistantShortcut(assistantEnabled);
   const showAssistant = assistantEnabled && assistantOpen && viewMode === "mail";
 
@@ -117,18 +120,32 @@ export default function MailPage() {
             >
               <ErrorBoundary
                 fallback={(reset) => (
-                  <div className="flex h-full w-[380px] shrink-0 flex-col items-center justify-center gap-3 border-l border-border bg-background p-6 text-center">
+                  <div
+                    className={cn(
+                      "flex flex-col items-center justify-center gap-3 border-l border-border bg-background p-6 text-center",
+                      isMobile ? "fixed inset-0 z-50" : "h-full w-[380px] shrink-0",
+                    )}
+                  >
                     <p className="text-sm text-muted-foreground">The assistant hit a problem.</p>
-                    <button
-                      type="button"
-                      className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
-                      onClick={() => {
-                        useAssistantStore.getState().reset();
-                        reset();
-                      }}
-                    >
-                      Reset assistant
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
+                        onClick={() => {
+                          useAssistantStore.getState().reset();
+                          reset();
+                        }}
+                      >
+                        Reset assistant
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
+                        onClick={() => useAssistantStore.getState().setOpen(false)}
+                      >
+                        Close
+                      </button>
+                    </div>
                   </div>
                 )}
               >
