@@ -148,6 +148,10 @@ pub fn request_body(model: &str, messages: &[ChatMessage], tools: Option<&Value>
         "stream_options": { "include_usage": true },
         // Keep conversations out of OpenAI's stored state (spec: Retention).
         "store": false,
+        // gpt-5.6 on /chat/completions refuses function tools unless reasoning
+        // is off ("Function tools with reasoning_effort are not supported …").
+        // The Responses API would allow both; revisit if answers need it.
+        "reasoning_effort": "none",
     });
     if let Some(t) = tools {
         body["tools"] = t.clone();
@@ -303,6 +307,8 @@ mod tests {
     fn request_never_stores_and_never_sets_temperature() {
         let body = request_body("gpt-5.6-terra", &[ChatMessage::user("hi")], None);
         assert_eq!(body["store"], false);
+        // gpt-5.6 rejects function tools on /chat/completions unless reasoning is off.
+        assert_eq!(body["reasoning_effort"], "none");
         assert_eq!(body["stream"], true);
         assert_eq!(body["stream_options"]["include_usage"], true);
         assert!(body.get("temperature").is_none());
