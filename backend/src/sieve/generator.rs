@@ -183,9 +183,14 @@ fn condition_to_sieve(cond: &FilterCondition) -> Option<String> {
     let header = field_to_header(&cond.field)?;
     let v = &cond.value;
 
+    // RFC 5228 `address` compares the address part, so "Name <a@b>" matches
+    // "a@b". `header :is` compared the whole header and never matched.
+    let is_address = matches!(cond.field.as_str(), "from" | "to" | "cc");
     let test = match cond.op.as_str() {
         "contains" => format!("header :contains \"{}\" \"{}\"", header, escape_sieve(v)),
         "not_contains" => format!("not header :contains \"{}\" \"{}\"", header, escape_sieve(v)),
+        "equals" if is_address => format!("address :is \"{}\" \"{}\"", header, escape_sieve(v)),
+        "not_equals" if is_address => format!("not address :is \"{}\" \"{}\"", header, escape_sieve(v)),
         "equals" => format!("header :is \"{}\" \"{}\"", header, escape_sieve(v)),
         "not_equals" => format!("not header :is \"{}\" \"{}\"", header, escape_sieve(v)),
         "starts_with" => format!("header :matches \"{}\" \"{}*\"", header, escape_sieve_glob(v)),
@@ -194,6 +199,39 @@ fn condition_to_sieve(cond: &FilterCondition) -> Option<String> {
     };
 
     Some(test)
+}
+
+#[cfg(test)]
+mod address_tests {
+    use super::*;
+
+    fn cond(field: &str, op: &str, value: &str) -> FilterCondition {
+        FilterCondition { field: field.to_string(), op: op.to_string(), value: value.to_string() }
+    }
+
+    #[test]
+    fn from_equals_compares_the_address_not_the_whole_header() {
+        assert_eq!(
+            condition_to_sieve(&cond("from", "equals", "billing@aws.example")).unwrap(),
+            "address :is \"From\" \"billing@aws.example\""
+        );
+    }
+
+    #[test]
+    fn to_not_equals_negates_the_address_test() {
+        assert_eq!(
+            condition_to_sieve(&cond("to", "not_equals", "me@altacee.dev")).unwrap(),
+            "not address :is \"To\" \"me@altacee.dev\""
+        );
+    }
+
+    #[test]
+    fn subject_equals_still_compares_the_header() {
+        assert_eq!(
+            condition_to_sieve(&cond("subject", "equals", "Hi")).unwrap(),
+            "header :is \"Subject\" \"Hi\""
+        );
+    }
 }
 
 fn action_to_sieve(action: &FilterAction) -> Option<String> {
