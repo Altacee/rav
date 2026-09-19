@@ -90,6 +90,11 @@ impl StreamAccumulator {
         }
         let chunk: Value = serde_json::from_str(data)
             .map_err(|e| ModelError::Fatal(format!("unreadable stream chunk: {e}")))?;
+        // A mid-stream `{"error": {...}}` chunk has no `choices` and would
+        // otherwise be silently skipped, producing an empty "done".
+        if chunk.get("error").is_some() {
+            return Err(ModelError::Fatal("OpenAI returned an error mid-stream".into()));
+        }
         if let Some(u) = chunk.get("usage").filter(|u| !u.is_null()) {
             self.reply.input_tokens = u["prompt_tokens"].as_u64().unwrap_or(0);
             self.reply.output_tokens = u["completion_tokens"].as_u64().unwrap_or(0);
@@ -101,8 +106,14 @@ impl StreamAccumulator {
             on_text(t);
             self.reply.content.push_str(t);
         }
+        // A run-away or malicious stream could send an unbounded index; refuse
+        // rather than growing tool_calls without bound.
+        const MAX_TOOL_CALL_INDEX: usize = 16;
         for tc in delta["tool_calls"].as_array().into_iter().flatten() {
             let i = tc["index"].as_u64().unwrap_or(0) as usize;
+            if i > MAX_TOOL_CALL_INDEX {
+                return Err(ModelError::Fatal("too many tool calls in one model response".into()));
+            }
             while self.reply.tool_calls.len() <= i {
                 self.reply.tool_calls.push(ToolCall {
                     id: String::new(),
@@ -263,6 +274,21 @@ mod tests {
         assert_eq!(r.tool_calls[0].function.name, "search_mail");
         assert_eq!(r.tool_calls[0].function.arguments, r#"{"query":"contract"}"#);
         assert_eq!(r.tool_calls[1].function.name, "read_message");
+    }
+
+    #[test]
+    fn a_mid_stream_error_chunk_is_fatal_not_silently_skipped() {
+        let mut acc = StreamAccumulator::default();
+        acc.push_line(r#"data: {"choices":[{"index":0,"delta":{"content":"Hi"}}]}"#, &mut |_: &str| {}).unwrap();
+        let err = acc.push_line(r#"data: {"error": {"message": "insufficient_quota", "type": "billing"}}"#, &mut |_: &str| {});
+        assert!(matches!(err, Err(ModelError::Fatal(_))));
+    }
+
+    #[test]
+    fn a_tool_call_index_past_the_bound_is_fatal() {
+        let mut acc = StreamAccumulator::default();
+        let line = r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":17,"id":"c","type":"function","function":{"name":"n","arguments":""}}]}}]}"#;
+        assert!(matches!(acc.push_line(line, &mut |_: &str| {}), Err(ModelError::Fatal(_))));
     }
 
     #[test]
