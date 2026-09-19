@@ -5,7 +5,12 @@ import { useUiStore } from "@/stores/useUiStore";
 
 const REF = /\[(m\d+)\]/g;
 // Bold before single-star em so "**x**" isn't read as two unmatched "*x*"s.
-const INLINE = /\*\*(.+?)\*\*|\*(.+?)\*|_(.+?)_|`(.+?)`|\[(m\d+)\]/g;
+// Star/underscore em require no whitespace just inside the markers (so
+// "5 * 3 * 2" stays literal) and underscore em additionally requires no
+// word character just outside the markers (so "first_last@x.com" and
+// "snake_case" aren't read as em).
+const INLINE =
+  /\*\*(.+?)\*\*|\*(?!\s)(.+?)(?<!\s)\*|(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)|`(.+?)`|\[(m\d+)\]/g;
 
 type Block = { type: "p"; lines: string[] } | { type: "ul" | "ol"; items: string[] };
 

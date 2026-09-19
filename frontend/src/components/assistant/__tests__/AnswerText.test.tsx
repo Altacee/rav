@@ -63,6 +63,32 @@ describe("AnswerText", () => {
     expect(document.querySelector("script")).toBeNull();
   });
 
+  it("leaves an underscore email address verbatim", () => {
+    render(<AnswerText text="Contact first_last@x.com and snake_case please." sources={[]} />);
+    expect(screen.getByText("Contact first_last@x.com and snake_case please.")).toBeTruthy();
+  });
+
+  it("leaves 'a * b * c' verbatim (no spurious em)", () => {
+    const { container } = render(<AnswerText text="a * b * c" sources={[]} />);
+    expect(container.querySelector("em")).toBeNull();
+    expect(screen.getByText("a * b * c")).toBeTruthy();
+  });
+
+  it("still italicises *em* and _em_", () => {
+    const { container } = render(<AnswerText text="This is *em* and this is _also em_." sources={[]} />);
+    const ems = Array.from(container.querySelectorAll("em")).map((e) => e.textContent);
+    expect(ems).toEqual(["em", "also em"]);
+  });
+
+  it("renders a chip inside bold", () => {
+    render(<AnswerText text="**See [m1] now**" sources={[
+      { ref: "m1", folder: "INBOX", uid: 1, subject: "A", from: "a", date: "d" },
+    ]} />);
+    const chip = screen.getByRole("button");
+    expect(chip.textContent).toBe("1");
+    expect(chip.closest("strong")).not.toBeNull();
+  });
+
   it("renders unclosed streaming markers without throwing", () => {
     expect(() => render(<AnswerText text={"This is **bold and still going"} sources={[]} />)).not.toThrow();
     expect(screen.getByText(/This is \*\*bold and still going/)).toBeTruthy();
