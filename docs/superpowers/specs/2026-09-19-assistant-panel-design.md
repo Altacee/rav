@@ -32,7 +32,7 @@ sending mail from chat, any write without a click.
 
 Module `backend/src/assistant/`, one file per job:
 
-- `openai.rs` — streaming client for the OpenAI Responses API over the existing
+- `openai.rs` — streaming client for OpenAI **Chat Completions** over the existing
   `reqwest`. Sends `store: false`. One retry with backoff on 429 and 5xx.
 - `tools.rs` — the tools, each a thin wrapper over existing code.
 - `session.rs` — the loop: model → tool → model, at most 5 tool steps, 60 s per
@@ -82,13 +82,14 @@ One SSE event per line, JSON data:
 |---|---|
 | `status` | `{ "text": "Searching mail…" }` |
 | `text` | `{ "delta": string }` |
-| `sources` | `[{ "n": 1, "ref", "folder", "folder_id", "uid", "subject", "from", "date" }]` |
-| `draft` | `{ "ref", "folder_id", "uid", "body" }` |
-| `action` | `{ "id", "kind", "summary", "messages": [{ "folder_id", "uid", "subject" }], "folder"?, "filter"? }` |
+| `sources` | every message the model saw, keyed by `ref`; the model cites `[mN]` and the UI numbers chips by first appearance: `[{ "ref", "folder", "uid", "subject", "from", "date" }]` |
+| `draft` | `{ "ref", "folder", "uid", "body" }` |
+| `action` | `{ "id", "kind", "summary", "messages": [{ "folder", "uid", "subject" }], "folder"?, "filter"? }` |
 | `error` | `{ "message": string, "retryable": bool }` |
 | `done` | `{ "input_tokens", "output_tokens" }` |
 
-Citations are `[n]` markers in the text, matched to `sources`.
+Citations are `[mN]` markers in the text, matched to `sources`. FolderIds are
+single-use, so events carry folder names and the UI resolves them.
 
 ### Safety
 

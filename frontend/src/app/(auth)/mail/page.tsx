@@ -25,6 +25,9 @@ import { CommandPalette } from "@/components/shared/CommandPalette";
 import { PreferencesLoader } from "@/components/PreferencesLoader";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { AssistantPanel, useAssistantShortcut } from "@/components/assistant/AssistantPanel";
+import { useAssistantStatus } from "@/hooks/useAssistant";
+import { useAssistantStore } from "@/stores/useAssistantStore";
 
 export default function MailPage() {
   const viewMode = useUiStore((s: UiState) => s.viewMode);
@@ -34,6 +37,10 @@ export default function MailPage() {
   useMobileNav();
   const { showBanner, requestPermission, dismissBanner, handleEvent } = useNotifications();
   const { status: wsStatus, failCount: wsFailCount } = useWebSocket(handleEvent);
+  const { enabled: assistantEnabled } = useAssistantStatus();
+  const assistantOpen = useAssistantStore((s) => s.open);
+  useAssistantShortcut(assistantEnabled);
+  const showAssistant = assistantEnabled && assistantOpen && viewMode === "mail";
 
   const wsContextValue = useMemo(
     () => ({ status: wsStatus, failCount: wsFailCount }),
@@ -99,6 +106,19 @@ export default function MailPage() {
         <div className="relative min-w-0 flex-1">
           <ErrorBoundary>{content}</ErrorBoundary>
         </div>
+        <AnimatePresence initial={false}>
+          {showAssistant && (
+            <motion.div
+              key="assistant"
+              className="flex min-h-0"
+              initial={shouldAnimateViews ? { opacity: 0, x: 16 } : false}
+              animate={{ opacity: 1, x: 0, transition: { duration: 0.18, ease: [0.2, 0, 0, 1] as const } }}
+              exit={shouldAnimateViews ? { opacity: 0, x: 16, transition: { duration: 0.12, ease: [0.2, 0, 0, 1] as const } } : undefined}
+            >
+              <AssistantPanel />
+            </motion.div>
+          )}
+        </AnimatePresence>
         <BottomTabBar />
         <ComposeFab />
       </div>

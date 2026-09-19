@@ -16,6 +16,10 @@ vi.mock("@/hooks/useKeyboardShortcuts", () => ({
   useKeyboardShortcuts: vi.fn(),
 }));
 
+vi.mock("@/hooks/useAssistant", () => ({
+  useAssistantStatus: () => ({ enabled: false }),
+}));
+
 vi.mock("@/hooks/useFolders", () => ({
   useFolders: () => ({ data: { folders: [] }, status: "success" }),
 }));

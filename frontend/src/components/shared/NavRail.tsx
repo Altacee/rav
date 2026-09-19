@@ -8,6 +8,7 @@ import {
   Users,
   Calendar,
   Settings,
+  Sparkles,
   Moon,
   Sun,
   Keyboard,
@@ -17,7 +18,9 @@ import { Tooltip } from "radix-ui";
 import { apiPost } from "@/lib/api";
 import { runThemeSpreadTransition } from "@/lib/motion/theme-spread";
 import { cn } from "@/lib/utils";
+import { useAssistantStatus } from "@/hooks/useAssistant";
 import { useComposeStore } from "@/stores/useComposeStore";
+import { useAssistantStore } from "@/stores/useAssistantStore";
 import { useUiStore } from "@/stores/useUiStore";
 import { useUpdateDisplayPreferences } from "@/hooks/useDisplayPreferences";
 import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
@@ -97,6 +100,8 @@ export function NavRail() {
   const effectiveAnimationMode = useUiStore((s) => s.effectiveAnimationMode);
   const updatePrefs = useUpdateDisplayPreferences();
   const resolvedTheme = useResolvedTheme();
+  const { enabled: assistantEnabled } = useAssistantStatus();
+  const assistantOpen = useAssistantStore((s) => s.open);
 
   const toggleTheme = useCallback((event: NavButtonClickEvent) => {
     const next = resolvedTheme === "dark" ? "light" : "dark";
@@ -186,6 +191,14 @@ export function NavRail() {
             active={viewMode === "settings"}
             onClick={() => setViewMode(viewMode === "settings" ? "mail" : "settings")}
           />
+          {assistantEnabled && (
+            <NavButton
+              icon={<Sparkles className="size-5" />}
+              label="Assistant (⌘J)"
+              active={assistantOpen}
+              onClick={() => useAssistantStore.getState().toggle()}
+            />
+          )}
         </div>
 
         {/* Spacer */}
