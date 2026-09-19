@@ -94,6 +94,24 @@ pub struct AppConfig {
     #[serde(default)]
     pub mailcow_api_key: Option<String>,
 
+    /// OpenAI key for the assistant panel. Unset means the assistant is off
+    /// for everyone and nothing is ever sent to OpenAI.
+    #[serde(default)]
+    pub openai_api_key: Option<String>,
+
+    /// OpenAI-compatible base URL, without a trailing slash.
+    #[serde(default = "default_openai_base_url")]
+    pub openai_base_url: String,
+
+    /// Chat model for the assistant.
+    #[serde(default = "default_assistant_model")]
+    pub assistant_model: String,
+
+    /// Comma-separated mailbox addresses that may use the assistant. Mail of
+    /// anyone else never reaches the model.
+    #[serde(default)]
+    pub assistant_allowlist: String,
+
     /// 32 bytes of base64 that seal stored push credentials. Unset means push
     /// is off: nothing is stored, nothing is decrypted.
     #[serde(default)]
@@ -246,6 +264,14 @@ fn default_db_pool_max_users() -> usize {
     500
 }
 
+fn default_openai_base_url() -> String {
+    "https://api.openai.com/v1".to_string()
+}
+
+fn default_assistant_model() -> String {
+    "gpt-5.6-terra".to_string()
+}
+
 impl AppConfig {
     /// Load configuration by layering serde defaults with environment variables.
     ///
@@ -256,6 +282,21 @@ impl AppConfig {
         Figment::new()
             .merge(Env::raw())
             .extract()
+    }
+
+    /// Whether `email` may use the assistant: a key is configured and the
+    /// address is on the allow-list (exact, case-insensitive).
+    #[allow(dead_code)]
+    pub fn assistant_enabled_for(&self, email: &str) -> bool {
+        let email = email.trim();
+        let has_key = self.openai_api_key.as_deref().is_some_and(|k| !k.trim().is_empty());
+        has_key
+            && !email.is_empty()
+            && self
+                .assistant_allowlist
+                .split(',')
+                .map(str::trim)
+                .any(|a| !a.is_empty() && a.eq_ignore_ascii_case(email))
     }
 }
 
@@ -347,5 +388,38 @@ mod tests {
             std::env::remove_var("IMAP_HOST");
             std::env::remove_var("DATA_DIR");
         }
+    }
+
+    fn assistant_config(key: Option<&str>, allowlist: &str) -> AppConfig {
+        let mut f = Figment::new().merge(("assistant_allowlist", allowlist));
+        if let Some(k) = key {
+            f = f.merge(("openai_api_key", k));
+        }
+        f.extract().expect("config")
+    }
+
+    #[test]
+    fn assistant_defaults() {
+        let config: AppConfig = Figment::new().extract().expect("defaults");
+        assert!(config.openai_api_key.is_none());
+        assert_eq!(config.openai_base_url, "https://api.openai.com/v1");
+        assert_eq!(config.assistant_model, "gpt-5.6-terra");
+        assert!(!config.assistant_enabled_for("aditya@altacee.dev"));
+    }
+
+    #[test]
+    fn assistant_allowlist_is_exact_and_case_insensitive() {
+        let c = assistant_config(Some("sk-test"), " Aditya@Altacee.dev , social@altacee.com");
+        assert!(c.assistant_enabled_for("aditya@altacee.dev"));
+        assert!(c.assistant_enabled_for("SOCIAL@altacee.com"));
+        assert!(!c.assistant_enabled_for("blitzlearn@altacee.site"));
+        assert!(!c.assistant_enabled_for("aditya@altacee.dev.evil.example"));
+        assert!(!c.assistant_enabled_for(""));
+    }
+
+    #[test]
+    fn assistant_needs_a_key() {
+        assert!(!assistant_config(None, "aditya@altacee.dev").assistant_enabled_for("aditya@altacee.dev"));
+        assert!(!assistant_config(Some("  "), "aditya@altacee.dev").assistant_enabled_for("aditya@altacee.dev"));
     }
 }

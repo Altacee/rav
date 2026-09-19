@@ -203,7 +203,11 @@ pub(crate) async fn perform_send(
 pub(crate) fn is_retryable(err: &AppError) -> bool {
     match err {
         AppError::ServiceUnavailable(msg) => !msg.contains("Authentication failed"),
-        AppError::InternalError(_) | AppError::NotFound(_) | AppError::BadRequest(_) | AppError::Unauthorized(_) => false,
+        AppError::InternalError(_)
+        | AppError::NotFound(_)
+        | AppError::BadRequest(_)
+        | AppError::Unauthorized(_)
+        | AppError::Forbidden(_) => false,
     }
 }
 

@@ -90,6 +90,8 @@ pub enum AppError {
     BadRequest(String),
     /// Service unavailable (503).
     ServiceUnavailable(String),
+    /// Forbidden (403): signed in, but not allowed to use this feature.
+    Forbidden(String),
 }
 
 impl AppError {
@@ -101,6 +103,7 @@ impl AppError {
             AppError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             AppError::BadRequest(_) => StatusCode::BAD_REQUEST,
             AppError::ServiceUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            AppError::Forbidden(_) => StatusCode::FORBIDDEN,
         }
     }
 
@@ -112,6 +115,7 @@ impl AppError {
             AppError::Unauthorized(_) => "UNAUTHORIZED",
             AppError::BadRequest(_) => "BAD_REQUEST",
             AppError::ServiceUnavailable(_) => "SERVICE_UNAVAILABLE",
+            AppError::Forbidden(_) => "FORBIDDEN",
         }
     }
 
@@ -122,7 +126,8 @@ impl AppError {
             | AppError::NotFound(msg)
             | AppError::Unauthorized(msg)
             | AppError::BadRequest(msg)
-            | AppError::ServiceUnavailable(msg) => msg,
+            | AppError::ServiceUnavailable(msg)
+            | AppError::Forbidden(msg) => msg,
         }
     }
 }
