@@ -24,11 +24,11 @@ pub mod search;
 pub mod pgp;
 pub mod send;
 pub mod spam;
+pub mod static_files;
 pub mod tags;
 pub mod vacation;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -42,7 +42,7 @@ use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::KeyExtractor;
 use tower_http::cors::CorsLayer;
-use tower_http::services::{ServeDir, ServeFile};
+
 use tower_http::trace::TraceLayer;
 
 use crate::auth::csrf::csrf_protection;
@@ -511,8 +511,7 @@ pub fn create_router(svc: AppServices) -> Router {
     #[cfg(feature = "stickers")]
     let api_router = api_router.merge(sticker_routes);
 
-    let index_path = Path::new(&config.static_dir).join("index.html");
-    let static_service = ServeDir::new(&config.static_dir).fallback(ServeFile::new(index_path));
+    let static_service = static_files::router(&config.static_dir);
 
     let inner = Router::new()
         .nest("/api", api_router)

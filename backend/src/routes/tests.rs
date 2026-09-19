@@ -401,6 +401,39 @@
     // Existing tests (updated to pass imap_client)
     // -----------------------------------------------------------------------
 
+    /// Next's static export writes `mail.html` plus a `mail/` data directory.
+    /// Without help, `/mail` redirected into that directory and fell back to
+    /// the login page, and the page then navigated to `/mail` again.
+    #[tokio::test]
+    async fn a_route_page_is_served_as_its_html_file_without_a_redirect() {
+        let dir = setup_static_dir();
+        fs::write(dir.path().join("mail.html"), "<html><body>MAIL PAGE</body></html>").unwrap();
+        fs::create_dir(dir.path().join("mail")).unwrap();
+        fs::write(dir.path().join("mail").join("data.txt"), "rsc").unwrap();
+        for uri in ["/mail", "/mail/", "/mail?x=1"] {
+            let config = test_config(dir.path().to_str().unwrap());
+            let app = create_router(AppServices { config, store: test_store(), ..test_services("/tmp") });
+            let response = app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            assert!(String::from_utf8_lossy(&body).contains("MAIL PAGE"), "{uri} served the wrong page");
+        }
+    }
+
+    /// A browser that keeps an old page shell after a deploy asks for data
+    /// from a build that no longer exists. HTML must be revalidated.
+    #[tokio::test]
+    async fn html_pages_are_revalidated_but_assets_are_not_forced() {
+        let dir = setup_static_dir();
+        fs::write(dir.path().join("app.js"), "x").unwrap();
+        let config = test_config(dir.path().to_str().unwrap());
+        let app = create_router(AppServices { config, store: test_store(), ..test_services("/tmp") });
+        let page = app.clone().oneshot(Request::builder().uri("/").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(page.headers().get("cache-control").map(|v| v.to_str().unwrap()), Some("no-cache"));
+        let asset = app.oneshot(Request::builder().uri("/app.js").body(Body::empty()).unwrap()).await.unwrap();
+        assert!(asset.headers().get("cache-control").is_none());
+    }
+
     #[tokio::test]
     async fn api_health_works_with_static_fallback() {
         let dir = setup_static_dir();
@@ -909,6 +942,43 @@
         assert_eq!(folders[1]["name"], "Sent");
         // recent_messages is always present, empty when no messages are cached.
         assert_eq!(folders[0]["recent_messages"], serde_json::json!([]));
+    }
+
+    /// A dead pooled IMAP session reads EOF during LIST, which the IMAP
+    /// library reports as zero folders with no error. A real mailbox always
+    /// has INBOX, so an empty LIST is a failure: it must not wipe the cache.
+    #[tokio::test]
+    async fn empty_imap_folder_list_is_an_error_and_keeps_the_cache() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
+        {
+            let conn = test_open_db(data_dir.path().to_str().unwrap(), &user_hash);
+            crate::db::folders::upsert_folder(&conn, UpsertFolderParams { name: "INBOX", delimiter: None, parent: None, flags_csv: "", is_subscribed: true, total_count: 0, unread_count: 0, uid_validity: 0, highest_modseq: 0 }).unwrap();
+            // Stale, so the handler goes to IMAP instead of serving the cache.
+            conn.execute("UPDATE folders SET updated_at = '2000-01-01T00:00:00Z'", []).unwrap();
+        }
+
+        let imap_client: Arc<dyn ImapClient> = Arc::new(MockImapClient::new().with_folders(vec![]));
+        let app = create_router(AppServices { config, store, imap_client, search_engine: test_search_engine(data_dir.path().to_str().unwrap()), db_pool_manager: test_db_pool_manager(data_dir.path().to_str().unwrap()), ..test_services("/tmp") });
+
+        let mut req = Request::builder().uri("/api/folders").header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
+        let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let conn = test_open_db(data_dir.path().to_str().unwrap(), &user_hash);
+        let kept: i64 = conn.query_row("SELECT COUNT(*) FROM folders WHERE name = 'INBOX'", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, 1, "the cached folder must survive an empty LIST");
     }
 
     #[tokio::test]

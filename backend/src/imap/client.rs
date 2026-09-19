@@ -404,6 +404,16 @@ impl ImapClient for RealImapClient {
                 names.push(result.map_err(map_imap_error)?);
             }
 
+            // async-imap ends the LIST stream on EOF too, so a closed socket
+            // looks like an empty mailbox. INBOX always exists; an empty
+            // answer means the connection is dead. Returning here drops the
+            // session instead of putting it back in the pool.
+            if names.is_empty() {
+                return Err(ImapError::ProtocolError(
+                    "LIST returned no mailboxes; connection likely closed".to_string(),
+                ));
+            }
+
             names
                 .iter()
                 .filter(|n| {

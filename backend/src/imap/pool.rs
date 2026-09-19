@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// A bounded set of idle values per key.
 ///
@@ -7,13 +8,24 @@ use std::sync::Mutex;
 /// testing, and it can be tested without an IMAP server. `SessionCache` adds
 /// everything IMAP-shaped on top.
 pub struct Pool<T> {
-    slots: Mutex<HashMap<String, Vec<T>>>,
+    slots: Mutex<HashMap<String, Vec<(T, Instant)>>>,
     max_idle: usize,
+    /// A value idle this long is dropped instead of handed out. `None` keeps
+    /// values forever.
+    max_age: Option<Duration>,
 }
 
 impl<T> Pool<T> {
+    #[cfg(test)]
     pub fn new(max_idle: usize) -> Self {
-        Pool { slots: Mutex::new(HashMap::new()), max_idle }
+        Pool { slots: Mutex::new(HashMap::new()), max_idle, max_age: None }
+    }
+
+    /// Like `new`, but values idle for `max_age` or longer are discarded on
+    /// `take` — for IMAP sessions, before the server's inactivity logout can
+    /// leave a dead socket in the pool.
+    pub fn with_max_age(max_idle: usize, max_age: Duration) -> Self {
+        Pool { slots: Mutex::new(HashMap::new()), max_idle, max_age: Some(max_age) }
     }
 
     #[cfg(test)]
@@ -23,7 +35,14 @@ impl<T> Pool<T> {
 
     pub fn take(&self, key: &str) -> Option<T> {
         let mut slots = self.slots.lock().unwrap();
-        slots.get_mut(key).and_then(Vec::pop)
+        let entry = slots.get_mut(key)?;
+        while let Some((value, idle_since)) = entry.pop() {
+            match self.max_age {
+                Some(max) if idle_since.elapsed() >= max => drop(value),
+                _ => return Some(value),
+            }
+        }
+        None
     }
 
     /// Returns false when this key is already at capacity, in which case
@@ -38,7 +57,7 @@ impl<T> Pool<T> {
         if entry.len() >= self.max_idle {
             return false;
         }
-        entry.push(value);
+        entry.push((value, Instant::now()));
         true
     }
 
@@ -82,5 +101,20 @@ mod tests {
         let pool = Pool::new(0);
         assert!(!pool.put("a", 1));
         assert_eq!(pool.take("a"), None);
+    }
+
+    #[test]
+    fn a_value_idle_past_max_age_is_never_handed_out() {
+        let pool = Pool::with_max_age(3, Duration::ZERO);
+        assert!(pool.put("a", 1));
+        assert_eq!(pool.take("a"), None, "a stale value must be dropped, not reused");
+        assert_eq!(pool.idle_count("a"), 0, "and it must not linger in the slot");
+    }
+
+    #[test]
+    fn a_value_within_max_age_is_reused() {
+        let pool = Pool::with_max_age(3, Duration::from_secs(3600));
+        assert!(pool.put("a", 1));
+        assert_eq!(pool.take("a"), Some(1));
     }
 }
