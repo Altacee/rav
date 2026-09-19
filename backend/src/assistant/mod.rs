@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 pub mod actions;
 pub mod events;
+pub mod mail;
 pub mod model;
 pub mod refs;
 pub mod session;
