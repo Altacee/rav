@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import type { ActionProposal, AssistantEvent, AssistantSource, DraftProposal } from "@/types/assistant";
+import { useAuthStore } from "@/stores/useAuthStore";
+import { useUiStore } from "@/stores/useUiStore";
 
 export const ASSISTANT_OPEN_KEY = "assistant-open";
 
@@ -14,6 +16,11 @@ export interface AssistantTurn {
   error: { message: string; retryable: boolean } | null;
   done: boolean;
   context: { folder: string; uid: number } | null;
+  /** The active account when this turn was asked. A turn's action/draft
+   * cards must refuse to act once this no longer matches the active
+   * account: otherwise switching mailboxes lets a stale card confirm
+   * against the wrong mailbox's folders/uids. */
+  accountId: string | null;
 }
 
 interface AssistantState {
@@ -36,6 +43,10 @@ interface AssistantState {
   endRequest: () => void;
   /** Aborts the in-flight request, if any. */
   stopRequest: () => void;
+  /** Aborts any in-flight request and drops all turns. Called on account
+   * switch and on logout so one mailbox's conversation, drafts and action
+   * cards never linger over another. */
+  reset: () => void;
 }
 
 function readOpen(): boolean {
@@ -84,15 +95,22 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   },
   toggle: () =>
     set((s) => {
-      writeOpen(!s.open);
-      return { open: !s.open };
+      const next = !s.open;
+      writeOpen(next);
+      // The ✦ entry points (nav rail, ⌘J, mobile tab) only toggle this
+      // panel; the panel itself only renders in mail view. Opening it must
+      // also switch to mail view, or it does nothing outside mail. Closing
+      // leaves the view as it is.
+      if (next) useUiStore.getState().setViewMode("mail");
+      return { open: next };
     }),
   startTurn: (question, context) => {
     const id = crypto.randomUUID();
+    const accountId = useAuthStore.getState().activeAccountId;
     set((s) => ({
       turns: [
         ...s.turns,
-        { id, question, answer: "", status: "Thinking…", sources: [], drafts: [], actions: [], error: null, done: false, context },
+        { id, question, answer: "", status: "Thinking…", sources: [], drafts: [], actions: [], error: null, done: false, context, accountId },
       ],
     }));
     return id;
@@ -100,7 +118,7 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   applyEvent: (id, e) => set((s) => ({ turns: s.turns.map((t) => (t.id === id ? fold(t, e) : t)) })),
   failTurn: (id, message, retryable) =>
     set((s) => ({ turns: s.turns.map((t) => (t.id === id ? fold(t, { type: "error", message, retryable }) : t)) })),
-  clear: () => set({ turns: [] }),
+  clear: () => get().reset(),
   beginRequest: () => {
     if (get().busy) return null;
     const controller = new AbortController();
@@ -109,4 +127,21 @@ export const useAssistantStore = create<AssistantState>((set, get) => ({
   },
   endRequest: () => set({ busy: false, abortController: null }),
   stopRequest: () => get().abortController?.abort(),
+  reset: () => {
+    get().abortController?.abort();
+    set({ turns: [], busy: false, abortController: null });
+  },
 }));
+
+// Account switch and logout both end up changing the active account id (see
+// AccountSwitcher and NavRail); reset here so a stale conversation, an
+// in-flight stream, or a stamped draft/action card never survives across
+// mailboxes. Keyed on the id rather than called from each call site, so no
+// future account-switching path can forget it.
+let lastActiveAccountId = useAuthStore.getState().activeAccountId;
+useAuthStore.subscribe((state) => {
+  if (state.activeAccountId !== lastActiveAccountId) {
+    lastActiveAccountId = state.activeAccountId;
+    useAssistantStore.getState().reset();
+  }
+});

@@ -1,5 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
-import { runAction } from "@/components/assistant/ProposalCard";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { runAction, ActionCard, DraftCard } from "@/components/assistant/ProposalCard";
+import { useAuthStore } from "@/stores/useAuthStore";
+
+vi.mock("@/hooks/useMessages", () => ({
+  fetchMessage: vi.fn(),
+  useBulkMoveMessages: () => ({ mutateAsync: vi.fn() }),
+  useBulkUpdateFlags: () => ({ mutateAsync: vi.fn() }),
+}));
+vi.mock("@/hooks/useFilters", () => ({ useCreateFilter: () => ({ mutateAsync: vi.fn() }) }));
+vi.mock("@/hooks/useIdentities", () => ({ useIdentities: () => ({ data: [] }) }));
+vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({}) }));
 
 const deps = () => ({ bulkMove: vi.fn().mockResolvedValue({}), bulkFlags: vi.fn().mockResolvedValue({}), createFilter: vi.fn().mockResolvedValue({}) });
 
@@ -30,4 +41,36 @@ describe("runAction", () => {
     });
   });
 
+});
+
+describe("stale-account cards refuse to act", () => {
+  beforeEach(() => {
+    useAuthStore.setState({ accounts: [], activeAccountId: "acct-b" });
+  });
+
+  it("disables Confirm on an ActionCard stamped with a different account", () => {
+    render(
+      <ActionCard
+        accountId="acct-a"
+        action={{ id: "a", kind: "archive", summary: "Archive 1 email", messages: [] }}
+      />,
+    );
+    expect((screen.getByRole("button", { name: "Confirm" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/different account/i)).toBeTruthy();
+  });
+
+  it("leaves Confirm enabled when the account still matches", () => {
+    render(
+      <ActionCard
+        accountId="acct-b"
+        action={{ id: "a", kind: "archive", summary: "Archive 1 email", messages: [] }}
+      />,
+    );
+    expect((screen.getByRole("button", { name: "Confirm" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("disables Open in compose on a DraftCard stamped with a different account", () => {
+    render(<DraftCard accountId="acct-a" draft={{ ref: "m1", folder: "INBOX", uid: 1, body: "hi" }} />);
+    expect((screen.getByRole("button", { name: /open in compose/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });

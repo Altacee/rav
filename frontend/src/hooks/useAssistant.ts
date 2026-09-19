@@ -38,7 +38,17 @@ export function buildChatMessages(turns: AssistantTurn[], question: string): Cha
       { role: "assistant", content: t.answer },
     ]);
   const messages = [...history.slice(-MAX_HISTORY_MESSAGES), { role: "user" as const, content: question }];
-  return messages.map((m) => ({ ...m, content: m.content.slice(0, MAX_CONTENT_CHARS) }));
+  return messages.map((m) => ({ ...m, content: truncateCodePoints(m.content, MAX_CONTENT_CHARS) }));
+}
+
+/**
+ * Truncates by Unicode code point, not UTF-16 unit. `string.slice` counts
+ * UTF-16 units and can split a surrogate pair in two, leaving a lone
+ * surrogate that serde rejects as invalid JSON — which would 400 every
+ * later question once the history carries it.
+ */
+function truncateCodePoints(s: string, max: number): string {
+  return Array.from(s).slice(0, max).join("");
 }
 
 export function useAssistantChat(): {

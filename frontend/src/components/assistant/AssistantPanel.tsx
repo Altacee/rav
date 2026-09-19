@@ -92,8 +92,8 @@ export function AssistantPanel() {
             <p className="ml-8 bg-muted px-3 py-2 text-sm">{t.question}</p>
             {t.status && <p className="text-xs text-muted-foreground">{t.status}</p>}
             {t.answer && <AnswerText text={t.answer} sources={t.sources} />}
-            {t.drafts.map((d) => <DraftCard key={`${d.ref}-${d.body.length}`} draft={d} />)}
-            {t.actions.map((a) => <ActionCard key={a.id} action={a} />)}
+            {t.drafts.map((d) => <DraftCard key={`${d.ref}-${d.body.length}`} draft={d} accountId={t.accountId} />)}
+            {t.actions.map((a) => <ActionCard key={a.id} action={a} accountId={t.accountId} />)}
             {t.error && (
               <div role="alert" className="flex items-center justify-between border border-destructive/50 px-3 py-2 text-xs text-destructive">
                 {t.error.message}

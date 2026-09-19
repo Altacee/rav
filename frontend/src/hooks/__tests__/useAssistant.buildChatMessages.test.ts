@@ -14,6 +14,7 @@ function turn(i: number, overrides: Partial<AssistantTurn> = {}): AssistantTurn 
     error: null,
     done: true,
     context: null,
+    accountId: null,
     ...overrides,
   };
 }
@@ -35,6 +36,19 @@ describe("buildChatMessages", () => {
     const messages = buildChatMessages(turns, "y".repeat(9000));
     expect(messages[1].content).toHaveLength(8000);
     expect(messages[messages.length - 1].content).toHaveLength(8000);
+  });
+
+  it("truncates by code point, never splitting a surrogate pair at the boundary", () => {
+    // 7999 ASCII chars + one emoji (a surrogate pair, 2 UTF-16 units) straddles
+    // the 8000 boundary: a naive .slice(0, 8000) would cut the pair in half.
+    const long = "x".repeat(7999) + "\u{1F600}" + "y".repeat(50);
+    const turns = [turn(0, { answer: long })];
+    const messages = buildChatMessages(turns, "q");
+    const truncated = messages[1].content;
+    expect(Array.from(truncated)).toHaveLength(8000);
+    expect(truncated.endsWith("\u{1F600}")).toBe(true);
+    // A lone surrogate is not valid JSON text; round-tripping must not throw.
+    expect(() => JSON.parse(JSON.stringify(truncated))).not.toThrow();
   });
 
   it("excludes turns that are not done or that errored", () => {

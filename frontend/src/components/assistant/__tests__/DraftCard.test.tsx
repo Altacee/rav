@@ -32,13 +32,13 @@ describe("DraftCard", () => {
   });
 
   it("does not fetch the message just by rendering", () => {
-    render(withQueryClient(<DraftCard draft={{ ref: "m1", folder: "INBOX", uid: 4, body: "Signed, thanks." }} />));
+    render(withQueryClient(<DraftCard accountId={null} draft={{ ref: "m1", folder: "INBOX", uid: 4, body: "Signed, thanks." }} />));
     expect(fetchMessage).not.toHaveBeenCalled();
   });
 
   it("fetches on click and opens compose as a reply with the drafted body", async () => {
     fetchMessage.mockResolvedValue(detail);
-    render(withQueryClient(<DraftCard draft={{ ref: "m1", folder: "INBOX", uid: 4, body: "Signed, thanks." }} />));
+    render(withQueryClient(<DraftCard accountId={null} draft={{ ref: "m1", folder: "INBOX", uid: 4, body: "Signed, thanks." }} />));
     fireEvent.click(screen.getByRole("button", { name: "Open in compose" }));
 
     await waitFor(() => expect(useComposeStore.getState().isOpen).toBe(true));
@@ -51,7 +51,7 @@ describe("DraftCard", () => {
 
   it("shows an inline error when the fetch fails", async () => {
     fetchMessage.mockRejectedValue(new Error("Could not load message"));
-    render(withQueryClient(<DraftCard draft={{ ref: "m1", folder: "INBOX", uid: 4, body: "Signed, thanks." }} />));
+    render(withQueryClient(<DraftCard accountId={null} draft={{ ref: "m1", folder: "INBOX", uid: 4, body: "Signed, thanks." }} />));
     fireEvent.click(screen.getByRole("button", { name: "Open in compose" }));
     expect((await screen.findByRole("alert")).textContent).toBe("Could not load message");
   });
@@ -59,7 +59,7 @@ describe("DraftCard", () => {
 
 describe("ActionCard", () => {
   it("runs nothing until Confirm, and Dismiss removes it", () => {
-    const { container } = render(<ActionCard action={{ id: "a", kind: "archive", summary: "Archive 1 email", folder: "Archive", messages: [{ folder: "INBOX", uid: 1, subject: "S" }] }} />);
+    const { container } = render(<ActionCard accountId={null} action={{ id: "a", kind: "archive", summary: "Archive 1 email", folder: "Archive", messages: [{ folder: "INBOX", uid: 1, subject: "S" }] }} />);
     expect(screen.getByText("Archive 1 email")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(container.textContent).toBe("");

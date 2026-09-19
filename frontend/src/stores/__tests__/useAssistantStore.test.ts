@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useAssistantStore } from "@/stores/useAssistantStore";
+import { useAuthStore } from "@/stores/useAuthStore";
+import { useUiStore } from "@/stores/useUiStore";
 
 describe("useAssistantStore", () => {
   beforeEach(() => {
     localStorage.clear();
-    useAssistantStore.setState({ open: false, turns: [] });
+    useAssistantStore.setState({ open: false, turns: [], busy: false, abortController: null });
+    useAuthStore.setState({ accounts: [], activeAccountId: "acct-a" });
+    useUiStore.setState({ viewMode: "settings" });
   });
 
   it("folds streamed events into a turn", () => {
@@ -37,5 +41,52 @@ describe("useAssistantStore", () => {
     useAssistantStore.getState().toggle();
     expect(useAssistantStore.getState().open).toBe(true);
     expect(localStorage.getItem("assistant-open")).toBe("1");
+  });
+
+  it("opening the panel via toggle switches to mail view; closing leaves the view alone", () => {
+    useUiStore.setState({ viewMode: "settings" });
+    useAssistantStore.getState().toggle(); // opens
+    expect(useAssistantStore.getState().open).toBe(true);
+    expect(useUiStore.getState().viewMode).toBe("mail");
+
+    useUiStore.setState({ viewMode: "contacts" });
+    useAssistantStore.getState().toggle(); // closes
+    expect(useAssistantStore.getState().open).toBe(false);
+    expect(useUiStore.getState().viewMode).toBe("contacts");
+  });
+
+  it("stamps a turn with the active account id", () => {
+    useAuthStore.setState({ activeAccountId: "acct-a" });
+    const id = useAssistantStore.getState().startTurn("hi", null);
+    expect(useAssistantStore.getState().turns.find((t) => t.id === id)?.accountId).toBe("acct-a");
+  });
+
+  it("reset() aborts any in-flight request and clears turns and busy", () => {
+    useAssistantStore.getState().startTurn("hi", null);
+    const controller = useAssistantStore.getState().beginRequest();
+    expect(controller).not.toBeNull();
+    useAssistantStore.getState().reset();
+    expect(controller!.signal.aborted).toBe(true);
+    expect(useAssistantStore.getState().turns).toHaveLength(0);
+    expect(useAssistantStore.getState().busy).toBe(false);
+    expect(useAssistantStore.getState().abortController).toBeNull();
+  });
+
+  it("clear() also aborts an in-flight request", () => {
+    useAssistantStore.getState().startTurn("hi", null);
+    const controller = useAssistantStore.getState().beginRequest();
+    useAssistantStore.getState().clear();
+    expect(controller!.signal.aborted).toBe(true);
+    expect(useAssistantStore.getState().turns).toHaveLength(0);
+  });
+
+  it("switching the active account resets turns and aborts the in-flight request", () => {
+    useAuthStore.setState({ activeAccountId: "acct-a" });
+    useAssistantStore.getState().startTurn("hi", null);
+    const controller = useAssistantStore.getState().beginRequest();
+    useAuthStore.setState({ activeAccountId: "acct-b" });
+    expect(controller!.signal.aborted).toBe(true);
+    expect(useAssistantStore.getState().turns).toHaveLength(0);
+    expect(useAssistantStore.getState().busy).toBe(false);
   });
 });

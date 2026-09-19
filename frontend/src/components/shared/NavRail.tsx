@@ -123,6 +123,11 @@ export function NavRail() {
       // Even if the API call fails, redirect to login
     }
     queryClient.clear();
+    // This path doesn't change useAuthStore's active account id (there is no
+    // account to fall back to), so the assistant store's own account-change
+    // subscription wouldn't fire; reset explicitly so no turn, draft or
+    // action card survives into the next signed-in session.
+    useAssistantStore.getState().reset();
     router.replace("/");
   }, [router, queryClient]);
 

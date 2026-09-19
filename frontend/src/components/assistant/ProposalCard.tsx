@@ -7,8 +7,18 @@ import { useCreateFilter } from "@/hooks/useFilters";
 import { useIdentities } from "@/hooks/useIdentities";
 import { buildReplyParams } from "@/lib/reply";
 import { useComposeStore } from "@/stores/useComposeStore";
+import { useAuthStore } from "@/stores/useAuthStore";
 import type { ActionProposal, DraftProposal } from "@/types/assistant";
 import type { CreateFilterRule } from "@/types/filter";
+
+/** True once the account the turn was asked under is no longer the active
+ * one — e.g. after switching mailboxes. A card in that state must refuse to
+ * act: its refs and folder names resolve against the mailbox it was asked
+ * about, not whichever one is open now. */
+function useIsStaleAccount(accountId: string | null): boolean {
+  const activeAccountId = useAuthStore((s) => s.activeAccountId);
+  return accountId !== null && accountId !== activeAccountId;
+}
 
 type Deps = {
   bulkMove: (a: { fromFolder: string; toFolder: string; uids: number[] }) => Promise<unknown>;
@@ -49,15 +59,17 @@ export async function runAction(action: ActionProposal, deps: Deps): Promise<voi
 
 const card = "border border-border bg-card p-3 text-sm";
 
-export function DraftCard({ draft }: { draft: DraftProposal }) {
+export function DraftCard({ draft, accountId }: { draft: DraftProposal; accountId: string | null }) {
   const queryClient = useQueryClient();
   const { data: identities } = useIdentities();
   const [state, setState] = useState<"idle" | "loading" | { error: string }>("idle");
+  const stale = useIsStaleAccount(accountId);
 
   // Fetching the message body uses non-peek IMAP and marks it \Seen, so it
   // must only happen from the user's click — never as a side effect of the
   // card rendering.
   const openInCompose = async () => {
+    if (stale) return;
     setState("loading");
     try {
       const data = await fetchMessage(queryClient, draft.folder, draft.uid);
@@ -72,21 +84,24 @@ export function DraftCard({ draft }: { draft: DraftProposal }) {
     <div className={card}>
       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Draft reply</p>
       <p className="line-clamp-6 whitespace-pre-wrap">{draft.body}</p>
-      <Button size="sm" className="mt-3" disabled={state === "loading"} onClick={openInCompose}>
+      <Button size="sm" className="mt-3" disabled={state === "loading" || stale} onClick={openInCompose}>
         {state === "loading" ? "Opening…" : "Open in compose"}
       </Button>
+      {stale && <p className="mt-2 text-xs text-muted-foreground">From a different account; switch back to use it.</p>}
       {typeof state === "object" && <p role="alert" className="mt-2 text-xs text-destructive">{state.error}</p>}
     </div>
   );
 }
 
-export function ActionCard({ action }: { action: ActionProposal }) {
+export function ActionCard({ action, accountId }: { action: ActionProposal; accountId: string | null }) {
   const bulkMove = useBulkMoveMessages();
   const bulkFlags = useBulkUpdateFlags();
   const createFilter = useCreateFilter();
   const [state, setState] = useState<"idle" | "running" | "done" | "dismissed" | { error: string }>("idle");
+  const stale = useIsStaleAccount(accountId);
   if (state === "dismissed") return null;
   const confirm = async () => {
+    if (stale) return;
     setState("running");
     try {
       await runAction(action, {
@@ -112,10 +127,11 @@ export function ActionCard({ action }: { action: ActionProposal }) {
         <p className="mt-2 text-xs text-primary">Done.</p>
       ) : (
         <div className="mt-3 flex gap-2">
-          <Button size="sm" onClick={confirm} disabled={state === "running"}>Confirm</Button>
+          <Button size="sm" onClick={confirm} disabled={state === "running" || stale}>Confirm</Button>
           <Button size="sm" variant="ghost" onClick={() => setState("dismissed")} disabled={state === "running"}>Dismiss</Button>
         </div>
       )}
+      {stale && <p className="mt-2 text-xs text-muted-foreground">From a different account; switch back to use it.</p>}
       {typeof state === "object" && <p role="alert" className="mt-2 text-xs text-destructive">{state.error}</p>}
     </div>
   );
