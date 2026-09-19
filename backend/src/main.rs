@@ -14,6 +14,7 @@ mod mfa;
 mod sieve;
 mod smtp;
 mod auth;
+mod assistant;
 mod push;
 mod realtime;
 mod routes;
