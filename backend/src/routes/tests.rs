@@ -3402,3 +3402,80 @@
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
+
+    // -----------------------------------------------------------------------
+    // Assistant routes
+    // -----------------------------------------------------------------------
+
+    /// Router for alice@example.com with the assistant configured as given.
+    fn assistant_app(
+        static_dir: &TempDir,
+        data_dir: &TempDir,
+        key: Option<&str>,
+        allowlist: &str,
+    ) -> (Router, Vec<(&'static str, String)>) {
+        let mut config = (*test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        ))
+        .clone();
+        config.openai_api_key = key.map(String::from);
+        config.assistant_allowlist = allowlist.to_string();
+        // Nothing listens on port 9: a model call fails fast, offline.
+        config.openai_base_url = "http://127.0.0.1:9".to_string();
+        let store = test_store();
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &crate::auth::user_data::hash_email("alice@example.com"));
+        let app = create_router(AppServices {
+            config: Arc::new(config),
+            store,
+            search_engine: test_search_engine(data_dir.path().to_str().unwrap()),
+            db_pool_manager: test_db_pool_manager(data_dir.path().to_str().unwrap()),
+            ..test_services("/tmp")
+        });
+        (app, auth_headers(&browser_id, &account_id, &token))
+    }
+
+    fn assistant_request(method: &str, uri: &str, headers: &[(&'static str, String)], body: &str) -> Request<Body> {
+        let mut req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("x-requested-with", "XMLHttpRequest")
+            .header("content-type", "application/json");
+        for (name, value) in headers {
+            req = req.header(*name, value);
+        }
+        req.body(Body::from(body.to_string())).unwrap()
+    }
+
+    const HI: &str = r#"{"messages":[{"role":"user","content":"hi"}],"open":null}"#;
+
+    #[tokio::test]
+    async fn assistant_status_is_off_without_a_key() {
+        let (s, d) = (setup_static_dir(), TempDir::new().unwrap());
+        let (app, h) = assistant_app(&s, &d, None, "alice@example.com");
+        let res = app.oneshot(assistant_request("GET", "/api/assistant/status", &h, "")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&body[..], br#"{"enabled":false}"#);
+    }
+
+    #[tokio::test]
+    async fn assistant_chat_is_forbidden_off_the_allowlist() {
+        let (s, d) = (setup_static_dir(), TempDir::new().unwrap());
+        let (app, h) = assistant_app(&s, &d, Some("sk-test"), "bob@example.com");
+        let res = app.oneshot(assistant_request("POST", "/api/assistant/chat", &h, HI)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn assistant_chat_streams_an_error_event_when_openai_is_unreachable() {
+        let (s, d) = (setup_static_dir(), TempDir::new().unwrap());
+        let (app, h) = assistant_app(&s, &d, Some("sk-test"), "alice@example.com");
+        let res = app.oneshot(assistant_request("POST", "/api/assistant/chat", &h, HI)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.headers()["content-type"], "text/event-stream");
+        let body = String::from_utf8(res.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+        assert!(body.contains("event: error"), "{body}");
+        assert!(body.contains(r#""retryable":true"#), "{body}");
+    }

@@ -286,7 +286,6 @@ impl AppConfig {
 
     /// Whether `email` may use the assistant: a key is configured and the
     /// address is on the allow-list (exact, case-insensitive).
-    #[allow(dead_code)]
     pub fn assistant_enabled_for(&self, email: &str) -> bool {
         let email = email.trim();
         let has_key = self.openai_api_key.as_deref().is_some_and(|k| !k.trim().is_empty());

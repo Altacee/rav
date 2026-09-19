@@ -1,3 +1,4 @@
+pub mod assistant;
 pub mod attachments;
 pub mod auth;
 pub mod mfa;
@@ -280,6 +281,8 @@ pub fn create_router(svc: AppServices) -> Router {
 
     // Protected data routes (auth_guard + CSRF).
     let protected_data = Router::new()
+        .route("/assistant/status", get(assistant::status))
+        .route("/assistant/chat", post(assistant::chat))
         .route(
             "/folders",
             get(folders::list_folders).post(folder_mgmt::create_folder),
