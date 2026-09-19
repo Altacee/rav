@@ -20,6 +20,13 @@ pub type ImapSession = async_imap::Session<ImapStream>;
 /// once, which is what actually OOM-killed the process.
 const MAX_CONCURRENT_CONNECTS_PER_ACCOUNT: usize = 4;
 
+/// A pooled session idle this long is discarded rather than reused. Dovecot
+/// logs out a non-IDLE connection after 30 minutes of no input (a compile-time
+/// constant, not configurable in mailcow); reusing one after that hands a
+/// closed socket to the next command. On 2026-09-19 that made LIST read EOF as
+/// "zero folders" and the webmail showed an empty mailbox. Stay under 30.
+const SESSION_MAX_IDLE: std::time::Duration = std::time::Duration::from_secs(25 * 60);
+
 /// Up to `max_idle` reusable sessions per account (email@host).
 ///
 /// Acquiring takes a session out of the pool; releasing puts it back. On error
@@ -36,7 +43,7 @@ impl SessionCache {
     /// `MAX_CONCURRENT_CONNECTS_PER_ACCOUNT`, which must not move.
     pub fn new(max_idle: usize) -> Self {
         SessionCache {
-            pool: Pool::new(max_idle),
+            pool: Pool::with_max_age(max_idle, SESSION_MAX_IDLE),
             connect_limits: Mutex::new(HashMap::new()),
         }
     }

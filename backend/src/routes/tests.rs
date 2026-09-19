@@ -891,6 +891,43 @@
         assert_eq!(folders[0]["recent_messages"], serde_json::json!([]));
     }
 
+    /// A dead pooled IMAP session reads EOF during LIST, which the IMAP
+    /// library reports as zero folders with no error. A real mailbox always
+    /// has INBOX, so an empty LIST is a failure: it must not wipe the cache.
+    #[tokio::test]
+    async fn empty_imap_folder_list_is_an_error_and_keeps_the_cache() {
+        let static_dir = setup_static_dir();
+        let data_dir = TempDir::new().unwrap();
+        let config = test_config_with_imap(
+            static_dir.path().to_str().unwrap(),
+            data_dir.path().to_str().unwrap(),
+        );
+        let store = test_store();
+        let (browser_id, account_id, token) = setup_test_account(&store, "alice@example.com");
+        let user_hash = crate::auth::user_data::hash_email("alice@example.com");
+        provision_user_db(data_dir.path().to_str().unwrap(), &user_hash);
+        {
+            let conn = test_open_db(data_dir.path().to_str().unwrap(), &user_hash);
+            crate::db::folders::upsert_folder(&conn, UpsertFolderParams { name: "INBOX", delimiter: None, parent: None, flags_csv: "", is_subscribed: true, total_count: 0, unread_count: 0, uid_validity: 0, highest_modseq: 0 }).unwrap();
+            // Stale, so the handler goes to IMAP instead of serving the cache.
+            conn.execute("UPDATE folders SET updated_at = '2000-01-01T00:00:00Z'", []).unwrap();
+        }
+
+        let imap_client: Arc<dyn ImapClient> = Arc::new(MockImapClient::new().with_folders(vec![]));
+        let app = create_router(AppServices { config, store, imap_client, search_engine: test_search_engine(data_dir.path().to_str().unwrap()), db_pool_manager: test_db_pool_manager(data_dir.path().to_str().unwrap()), ..test_services("/tmp") });
+
+        let mut req = Request::builder().uri("/api/folders").header("x-requested-with", "XMLHttpRequest");
+        for (name, value) in auth_headers(&browser_id, &account_id, &token) {
+            req = req.header(name, value);
+        }
+        let response = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let conn = test_open_db(data_dir.path().to_str().unwrap(), &user_hash);
+        let kept: i64 = conn.query_row("SELECT COUNT(*) FROM folders WHERE name = 'INBOX'", [], |r| r.get(0)).unwrap();
+        assert_eq!(kept, 1, "the cached folder must survive an empty LIST");
+    }
+
     #[tokio::test]
     async fn get_folders_includes_recent_messages_when_cached() {
         let static_dir = setup_static_dir();

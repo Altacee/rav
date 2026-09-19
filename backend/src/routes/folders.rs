@@ -81,6 +81,15 @@ pub async fn list_folders(
             .await
             .map_err(|e| AppError::ServiceUnavailable(format!("IMAP error: {e}")))?;
 
+        // Every mailbox has INBOX (RFC 3501), so an empty LIST means the read
+        // failed — a dead pooled connection reads EOF as "no folders". Treating
+        // it as real would delete every cached folder and its messages below.
+        if imap_folders.is_empty() {
+            return Err(AppError::ServiceUnavailable(
+                "IMAP error: the server returned no folders".to_string(),
+            ));
+        }
+
         db::pool::with_user_db(&db_pool_manager, &session.user_hash, move |conn| {
             // Sync each folder into SQLite cache.
             // Use INSERT OR IGNORE to create new folders without triggering CASCADE on
