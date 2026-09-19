@@ -2,6 +2,7 @@
 //! Drafts and actions are proposals; nothing here writes to the mailbox.
 // removed in Task 10 once the routes use everything
 #![allow(dead_code)]
+pub mod actions;
 pub mod events;
 pub mod refs;
 pub mod text;
