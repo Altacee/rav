@@ -381,6 +381,39 @@
     // Existing tests (updated to pass imap_client)
     // -----------------------------------------------------------------------
 
+    /// Next's static export writes `mail.html` plus a `mail/` data directory.
+    /// Without help, `/mail` redirected into that directory and fell back to
+    /// the login page, and the page then navigated to `/mail` again.
+    #[tokio::test]
+    async fn a_route_page_is_served_as_its_html_file_without_a_redirect() {
+        let dir = setup_static_dir();
+        fs::write(dir.path().join("mail.html"), "<html><body>MAIL PAGE</body></html>").unwrap();
+        fs::create_dir(dir.path().join("mail")).unwrap();
+        fs::write(dir.path().join("mail").join("data.txt"), "rsc").unwrap();
+        for uri in ["/mail", "/mail/", "/mail?x=1"] {
+            let config = test_config(dir.path().to_str().unwrap());
+            let app = create_router(AppServices { config, store: test_store(), ..test_services("/tmp") });
+            let response = app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            assert!(String::from_utf8_lossy(&body).contains("MAIL PAGE"), "{uri} served the wrong page");
+        }
+    }
+
+    /// A browser that keeps an old page shell after a deploy asks for data
+    /// from a build that no longer exists. HTML must be revalidated.
+    #[tokio::test]
+    async fn html_pages_are_revalidated_but_assets_are_not_forced() {
+        let dir = setup_static_dir();
+        fs::write(dir.path().join("app.js"), "x").unwrap();
+        let config = test_config(dir.path().to_str().unwrap());
+        let app = create_router(AppServices { config, store: test_store(), ..test_services("/tmp") });
+        let page = app.clone().oneshot(Request::builder().uri("/").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(page.headers().get("cache-control").map(|v| v.to_str().unwrap()), Some("no-cache"));
+        let asset = app.oneshot(Request::builder().uri("/app.js").body(Body::empty()).unwrap()).await.unwrap();
+        assert!(asset.headers().get("cache-control").is_none());
+    }
+
     #[tokio::test]
     async fn api_health_works_with_static_fallback() {
         let dir = setup_static_dir();
