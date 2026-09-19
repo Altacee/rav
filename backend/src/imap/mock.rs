@@ -18,6 +18,11 @@ pub struct MockImapClient {
     vanished: Mutex<Option<Vec<u32>>>,
     pub appended: Mutex<Vec<(String, Vec<u8>)>>,
     next_uid: Mutex<u32>,
+    /// When set, `fetch_body` errors instead of returning data — used to prove
+    /// a caller reads via `fetch_raw_bytes` (BODY.PEEK[]) instead, which never
+    /// marks a message `\Seen`.
+    disable_fetch_body: Mutex<bool>,
+    raw_bytes: Mutex<Option<Vec<u8>>>,
 }
 
 impl MockImapClient {
@@ -33,6 +38,8 @@ impl MockImapClient {
             vanished: Mutex::new(None),
             appended: Mutex::new(Vec::new()),
             next_uid: Mutex::new(1),
+            disable_fetch_body: Mutex::new(false),
+            raw_bytes: Mutex::new(None),
         }
     }
 
@@ -80,6 +87,19 @@ impl MockImapClient {
     /// Make every subsequent call return this error.
     pub fn with_error(self, error: ImapError) -> Self {
         *self.should_fail.lock().unwrap() = Some(error);
+        self
+    }
+
+    /// Make `fetch_body` return an error, so a test can prove a caller never
+    /// calls it (and instead reads via `fetch_raw_bytes`, which peeks).
+    pub fn with_fetch_body_disabled(self) -> Self {
+        *self.disable_fetch_body.lock().unwrap() = true;
+        self
+    }
+
+    /// Pre-load the raw RFC 822 bytes that `fetch_raw_bytes` will return.
+    pub fn with_raw_bytes(self, bytes: Vec<u8>) -> Self {
+        *self.raw_bytes.lock().unwrap() = Some(bytes);
         self
     }
 }
@@ -157,6 +177,11 @@ impl ImapClient for MockImapClient {
         _folder: &str,
         uid: u32,
     ) -> Result<ImapMessageBody, ImapError> {
+        if *self.disable_fetch_body.lock().unwrap() {
+            return Err(ImapError::ProtocolError(
+                "fetch_body must not be used to read a message — it sets \\Seen; use fetch_raw_bytes (BODY.PEEK[])".to_string(),
+            ));
+        }
         if let Some(ref err) = *self.should_fail.lock().unwrap() {
             return Err(clone_error(err));
         }
@@ -460,6 +485,9 @@ impl ImapClient for MockImapClient {
     ) -> Result<Vec<u8>, ImapError> {
         if let Some(ref err) = *self.should_fail.lock().unwrap() {
             return Err(clone_error(err));
+        }
+        if let Some(ref bytes) = *self.raw_bytes.lock().unwrap() {
+            return Ok(bytes.clone());
         }
         Ok(b"From: test@example.com\r\nSubject: Test\r\n\r\nBody".to_vec())
     }

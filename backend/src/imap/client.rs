@@ -654,17 +654,7 @@ impl ImapClient for RealImapClient {
                     ImapError::ProtocolError("failed to parse RFC822 message".to_string())
                 })?;
 
-            let text_plain: Option<String> = parsed.body_text(0).map(|s| s.to_string());
-
-            let has_html_part = parsed.parts.iter().any(|part| {
-                part.content_type().is_some_and(|ct| ct.ctype() == "text" && ct.subtype() == Some("html"))
-            });
-
-            let text_html: Option<String> = if has_html_part {
-                parsed.body_html(0).map(|s| s.to_string())
-            } else {
-                None
-            };
+            let (text_plain, text_html) = extract_text_bodies(&parsed);
 
             tracing::debug!(
                 uid = uid,
@@ -1498,6 +1488,36 @@ impl ImapClient for RealImapClient {
         }
         Ok(raw)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Body text extraction (shared by fetch_body and any BODY.PEEK[] caller)
+// ---------------------------------------------------------------------------
+
+/// Pull the plain-text and HTML bodies out of an already-parsed message.
+fn extract_text_bodies(parsed: &mail_parser::Message<'_>) -> (Option<String>, Option<String>) {
+    use mail_parser::MimeHeaders;
+
+    let text_plain: Option<String> = parsed.body_text(0).map(|s| s.to_string());
+
+    let has_html_part = parsed
+        .parts
+        .iter()
+        .any(|part| part.content_type().is_some_and(|ct| ct.ctype() == "text" && ct.subtype() == Some("html")));
+
+    let text_html: Option<String> = if has_html_part { parsed.body_html(0).map(|s| s.to_string()) } else { None };
+
+    (text_plain, text_html)
+}
+
+/// Parse raw RFC 822 bytes (as returned by `fetch_raw_bytes`, a `BODY.PEEK[]`
+/// fetch that never sets `\Seen`) into plain-text and HTML bodies. Used by
+/// callers that must read a message's content without marking it read.
+pub fn parse_peeked_bodies(raw: &[u8]) -> Result<(Option<String>, Option<String>), ImapError> {
+    let parsed = mail_parser::MessageParser::default()
+        .parse(raw)
+        .ok_or_else(|| ImapError::ProtocolError("failed to parse RFC822 message".to_string()))?;
+    Ok(extract_text_bodies(&parsed))
 }
 
 // ---------------------------------------------------------------------------

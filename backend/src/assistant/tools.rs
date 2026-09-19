@@ -21,7 +21,6 @@ pub struct MessageContent {
     pub from: String,
     pub to: String,
     pub date: String,
-    pub message_id: Option<String>,
     pub body: String,
 }
 
@@ -243,7 +242,7 @@ pub(crate) mod tests {
         MessageContent {
             loc: MessageLoc { folder: folder.into(), uid },
             subject: subject.into(), from: from.into(), to: "me@altacee.dev".into(),
-            date: "2026-09-17".into(), message_id: Some(format!("<{uid}@x>")), body: body.into(),
+            date: "2026-09-17".into(), body: body.into(),
         }
     }
 
