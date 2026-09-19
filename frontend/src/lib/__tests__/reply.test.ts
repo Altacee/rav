@@ -16,8 +16,8 @@ describe("draftToHtml", () => {
 });
 
 describe("buildReplyParams", () => {
-  it("replies to the sender with threading headers and the given body", () => {
-    const p = buildReplyParams(detail, [{ id: 7, email: "me@altacee.dev" }] as never, "<p>Done</p>");
+  it("converts a plain-text draft to HTML when the original was HTML", () => {
+    const p = buildReplyParams(detail, [{ id: 7, email: "me@altacee.dev" }] as never, "Done");
     expect(p.to).toBe("anu@altacee.com");
     expect(p.subject).toMatch(/^Re: Contract/);
     expect(p.inReplyTo).toBe("<abc@x>");
@@ -25,5 +25,12 @@ describe("buildReplyParams", () => {
     expect(p.body).toBe("<p>Done</p>");
     expect(p.fromIdentityId).toBe(7);
     expect(p.isHtml).toBe(true);
+  });
+
+  it("keeps a plain-text draft as plain text when the original had no HTML", () => {
+    const plainDetail = { ...detail, html: null };
+    const p = buildReplyParams(plainDetail, undefined, "Signed, thanks.");
+    expect(p.body).toBe("Signed, thanks.");
+    expect(p.isHtml).toBe(false);
   });
 });

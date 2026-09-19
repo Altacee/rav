@@ -1,10 +1,11 @@
 "use client";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { useBulkMoveMessages, useBulkUpdateFlags, useMessage } from "@/hooks/useMessages";
+import { fetchMessage, useBulkMoveMessages, useBulkUpdateFlags } from "@/hooks/useMessages";
 import { useCreateFilter } from "@/hooks/useFilters";
 import { useIdentities } from "@/hooks/useIdentities";
-import { buildReplyParams, draftToHtml } from "@/lib/reply";
+import { buildReplyParams } from "@/lib/reply";
 import { useComposeStore } from "@/stores/useComposeStore";
 import type { ActionProposal, DraftProposal } from "@/types/assistant";
 import type { CreateFilterRule } from "@/types/filter";
@@ -49,20 +50,32 @@ export async function runAction(action: ActionProposal, deps: Deps): Promise<voi
 const card = "border border-border bg-card p-3 text-sm";
 
 export function DraftCard({ draft }: { draft: DraftProposal }) {
-  const { data } = useMessage(draft.folder, draft.uid);
+  const queryClient = useQueryClient();
   const { data: identities } = useIdentities();
+  const [state, setState] = useState<"idle" | "loading" | { error: string }>("idle");
+
+  // Fetching the message body uses non-peek IMAP and marks it \Seen, so it
+  // must only happen from the user's click — never as a side effect of the
+  // card rendering.
+  const openInCompose = async () => {
+    setState("loading");
+    try {
+      const data = await fetchMessage(queryClient, draft.folder, draft.uid);
+      useComposeStore.getState().openReply(buildReplyParams(data, identities, draft.body));
+      setState("idle");
+    } catch (e) {
+      setState({ error: e instanceof Error ? e.message : "Could not open this email" });
+    }
+  };
+
   return (
     <div className={card}>
       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Draft reply</p>
       <p className="line-clamp-6 whitespace-pre-wrap">{draft.body}</p>
-      <Button
-        size="sm"
-        className="mt-3"
-        disabled={!data}
-        onClick={() => data && useComposeStore.getState().openReply(buildReplyParams(data, identities, draftToHtml(draft.body)))}
-      >
-        Open in compose
+      <Button size="sm" className="mt-3" disabled={state === "loading"} onClick={openInCompose}>
+        {state === "loading" ? "Opening…" : "Open in compose"}
       </Button>
+      {typeof state === "object" && <p role="alert" className="mt-2 text-xs text-destructive">{state.error}</p>}
     </div>
   );
 }

@@ -7,7 +7,7 @@ import {
   useQueryClient,
   keepPreviousData,
 } from "@tanstack/react-query";
-import type { InfiniteData } from "@tanstack/react-query";
+import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import { apiGet, apiPatch, apiPost, apiDelete } from "@/lib/api";
 import { useWsStatus } from "@/lib/ws-context";
 import { useUiStore } from "@/stores/useUiStore";
@@ -37,14 +37,20 @@ export function useMessages(folder: string) {
   });
 }
 
-export function useMessage(folder: string, uid: number) {
-  const queryClient = useQueryClient();
-  return useQuery({
-    queryKey: ["message", folder, uid],
+function messageQueryOptions(queryClient: QueryClient, folder: string, uid: number) {
+  return {
+    queryKey: ["message", folder, uid] as const,
     queryFn: () =>
       apiGet<MessageDetail>(
         `/messages/${encodeURIComponent(resolveFolderId(queryClient, folder))}/${uid}`,
       ),
+  };
+}
+
+export function useMessage(folder: string, uid: number) {
+  const queryClient = useQueryClient();
+  return useQuery({
+    ...messageQueryOptions(queryClient, folder, uid),
     enabled: !!folder && uid > 0,
     retry: (failureCount, error) => {
       // Don't retry "not found" — the message was deleted from IMAP.
@@ -52,6 +58,16 @@ export function useMessage(folder: string, uid: number) {
       return failureCount < 2;
     },
   });
+}
+
+/**
+ * Imperatively fetches (and caches) a message body, for call sites that must
+ * not fetch as a side effect of rendering — e.g. a draft card should not mark
+ * an email read (non-peek IMAP + \Seen) just by being on screen; the fetch
+ * belongs inside the user's "Open in compose" click.
+ */
+export function fetchMessage(queryClient: QueryClient, folder: string, uid: number): Promise<MessageDetail> {
+  return queryClient.fetchQuery(messageQueryOptions(queryClient, folder, uid));
 }
 
 /** Look up a message by its Message-ID header. Returns null if not in the local cache. */

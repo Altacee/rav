@@ -32,16 +32,22 @@ export function draftToHtml(text: string): string {
     .join("");
 }
 
-/** The ReplyParams the Reply button builds, with an optional prefilled body. */
-export function buildReplyParams(data: MessageDetail, identities: Identity[] | undefined, body?: string): ReplyParams {
+/**
+ * The ReplyParams the Reply button builds, with an optional prefilled
+ * plain-text draft body. The draft is converted to HTML only when the
+ * original message was HTML (matching `isHtml`, which ComposeDialog uses to
+ * pick a rich editor or a plain <textarea>) — otherwise it is used as-is.
+ */
+export function buildReplyParams(data: MessageDetail, identities: Identity[] | undefined, draftBody?: string): ReplyParams {
   const messageId = extractHeader(data.raw_headers, "Message-ID");
   const refs = extractHeader(data.raw_headers, "References");
   const hasHtml = !!(data.html && data.html.trim());
+  const body = draftBody === undefined ? (hasHtml ? "<p><br></p>" : "") : hasHtml ? draftToHtml(draftBody) : draftBody;
   return {
     to: data.from_address,
     cc: "",
     subject: buildReplySubject(data.subject),
-    body: body ?? (hasHtml ? "<p><br></p>" : ""),
+    body,
     quotedHtml: hasHtml ? buildReplyQuoteHtml(data.html!, data.from_address, data.date) : null,
     quotedText: buildReplyQuoteText(data.text, data.from_address, data.date),
     inReplyTo: messageId,

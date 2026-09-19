@@ -1,9 +1,11 @@
 "use client";
 
-import { Mail, Calendar, Users, Search, PenSquare } from "lucide-react";
+import { Mail, Calendar, Users, Search, PenSquare, Sparkles } from "lucide-react";
 import { useUiStore } from "@/stores/useUiStore";
 import { useMobileNav } from "@/hooks/useMobileNav";
 import { useDisplayPreferences, parseMobileNavTabs } from "@/hooks/useDisplayPreferences";
+import { useAssistantStatus } from "@/hooks/useAssistant";
+import { useAssistantStore } from "@/stores/useAssistantStore";
 import { useComposeStore } from "@/stores/useComposeStore";
 import { cn } from "@/lib/utils";
 
@@ -40,6 +42,8 @@ export function BottomTabBar() {
   const setSearchActive = useUiStore((s) => s.setSearchActive);
   const { navigateTo } = useMobileNav();
   const openCompose = useComposeStore((s) => s.openCompose);
+  const { enabled: assistantEnabled } = useAssistantStatus();
+  const assistantOpen = useAssistantStore((s) => s.open);
 
   const enabledTabs = parseMobileNavTabs(prefs?.mobile_nav_tabs);
   const mobileCompose = prefs?.mobile_compose ?? "fab";
@@ -108,6 +112,20 @@ export function BottomTabBar() {
           <span>{tabLabel(tab)}</span>
         </button>
       ))}
+      {assistantEnabled && (
+        <button
+          type="button"
+          aria-label="Assistant"
+          onClick={() => useAssistantStore.getState().toggle()}
+          className={cn(
+            "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors",
+            assistantOpen ? "text-primary" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Sparkles className="size-5" />
+          <span>Assistant</span>
+        </button>
+      )}
     </nav>
   );
 }
