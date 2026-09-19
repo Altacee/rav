@@ -47,25 +47,9 @@ import type { EmailAddress, MessageDetail } from "@/types/message";
 import { useIdentities } from "@/hooks/useIdentities";
 import { useReplyDraft } from "@/hooks/useCompose";
 import { apiGet } from "@/lib/api";
-import type { Identity } from "@/types/identity";
 import { createFadeSlideVariants, createScaleFadeVariants } from "@/lib/motion/variants";
 import { AnimatedDiv } from "@/lib/motion/AnimatedDiv";
-
-/** Find the identity whose email matches one of the To/CC addresses. */
-function findMatchingIdentity(
-  identities: Identity[] | undefined,
-  toAddresses: EmailAddress[],
-  ccAddresses: EmailAddress[],
-): number | null {
-  if (!identities || identities.length === 0) return null;
-  const allRecipientEmails = [...toAddresses, ...ccAddresses].map((a) =>
-    a.address.toLowerCase(),
-  );
-  const match = identities.find((i) =>
-    allRecipientEmails.includes(i.email.toLowerCase()),
-  );
-  return match?.id ?? null;
-}
+import { buildReplyParams, findMatchingIdentity } from "@/lib/reply";
 
 function formatAddressList(addresses: EmailAddress[]): string {
   return addresses
@@ -161,20 +145,7 @@ export function MessageActionBar() {
 
     if (await openExistingReplyDraft(refs, data)) return;
 
-    const matchedId = findMatchingIdentity(identities, data.to_addresses, data.cc_addresses);
-    const hasHtml = !!(data.html && data.html.trim());
-    useComposeStore.getState().openReply({
-      to: data.from_address,
-      cc: "",
-      subject: buildReplySubject(data.subject),
-      body: hasHtml ? "<p><br></p>" : "",
-      quotedHtml: hasHtml ? buildReplyQuoteHtml(data.html!, data.from_address, data.date) : null,
-      quotedText: buildReplyQuoteText(data.text, data.from_address, data.date),
-      inReplyTo: messageId,
-      references: buildReferences(refs, messageId),
-      fromIdentityId: matchedId,
-      isHtml: hasHtml,
-    });
+    useComposeStore.getState().openReply(buildReplyParams(data, identities));
   };
 
   const handleReplyAll = async () => {
