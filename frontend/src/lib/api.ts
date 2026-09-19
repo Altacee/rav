@@ -89,6 +89,31 @@ export async function apiPost<T>(
   return res.json();
 }
 
+/** POST that returns the raw streaming Response (for text/event-stream). */
+export async function apiPostStream(
+  path: string,
+  body: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<Response> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...getActiveAccountHeader(),
+    },
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+
+  return res;
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: {
