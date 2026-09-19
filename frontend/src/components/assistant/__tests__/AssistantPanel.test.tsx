@@ -29,6 +29,19 @@ describe("AssistantPanel", () => {
     expect(screen.getByRole("button", { name: "Summarise this" })).toBeTruthy();
   });
 
+  it("renders no form element (native submit must be impossible)", () => {
+    const { container } = render(<AssistantPanel />);
+    expect(container.querySelector("form")).toBeNull();
+  });
+
+  it("sends via the Send button click", () => {
+    render(<AssistantPanel />);
+    const box = screen.getByRole("textbox", { name: "Ask the assistant" });
+    fireEvent.change(box, { target: { value: "hi there" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(ask).toHaveBeenCalledWith("hi there", true);
+  });
+
   it("sends with Enter and keeps Shift+Enter as a newline", () => {
     render(<AssistantPanel />);
     const box = screen.getByRole("textbox", { name: "Ask the assistant" });

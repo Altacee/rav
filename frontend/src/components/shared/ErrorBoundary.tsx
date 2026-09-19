@@ -2,7 +2,12 @@
 
 import { Component, type ReactNode } from "react";
 
-type Props = { children: ReactNode };
+type Props = {
+  children: ReactNode;
+  /** Custom fallback for this boundary. Receives a `reset` callback that
+   * clears the error and re-renders `children` (does not reload the page). */
+  fallback?: (reset: () => void) => ReactNode;
+};
 type State = { error: Error | null };
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -15,8 +20,11 @@ export class ErrorBoundary extends Component<Props, State> {
     return { error };
   }
 
+  reset = () => this.setState({ error: null });
+
   render() {
     if (this.state.error) {
+      if (this.props.fallback) return this.props.fallback(this.reset);
       return (
         <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
           <p className="text-sm font-medium text-foreground">Something went wrong</p>

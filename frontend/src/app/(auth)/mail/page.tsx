@@ -115,7 +115,25 @@ export default function MailPage() {
               animate={{ opacity: 1, x: 0, transition: { duration: 0.18, ease: [0.2, 0, 0, 1] as const } }}
               exit={shouldAnimateViews ? { opacity: 0, x: 16, transition: { duration: 0.12, ease: [0.2, 0, 0, 1] as const } } : undefined}
             >
-              <AssistantPanel />
+              <ErrorBoundary
+                fallback={(reset) => (
+                  <div className="flex h-full w-[380px] shrink-0 flex-col items-center justify-center gap-3 border-l border-border bg-background p-6 text-center">
+                    <p className="text-sm text-muted-foreground">The assistant hit a problem.</p>
+                    <button
+                      type="button"
+                      className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
+                      onClick={() => {
+                        useAssistantStore.getState().reset();
+                        reset();
+                      }}
+                    >
+                      Reset assistant
+                    </button>
+                  </div>
+                )}
+              >
+                <AssistantPanel />
+              </ErrorBoundary>
             </motion.div>
           )}
         </AnimatePresence>

@@ -107,7 +107,7 @@ export function AssistantPanel() {
         <div ref={endRef} />
       </div>
 
-      <form className="border-t border-border p-3" onSubmit={(e) => { e.preventDefault(); send(draft); }}>
+      <div className="border-t border-border p-3">
         {withEmail && openMsg && (
           <div className="mb-2 flex items-center justify-between border border-border px-2 py-1 text-xs text-muted-foreground">
             <span className="truncate">About: {openMsg.subject} · {openMsg.from_name || openMsg.from_address}</span>
@@ -134,10 +134,10 @@ export function AssistantPanel() {
           {busy ? (
             <button type="button" aria-label="Stop" onClick={stop} className="border border-border p-2"><Square className="size-4" /></button>
           ) : (
-            <button type="submit" aria-label="Send" disabled={!draft.trim()} className="bg-primary p-2 text-primary-foreground disabled:opacity-40"><ArrowUp className="size-4" /></button>
+            <button type="button" aria-label="Send" onClick={() => send(draft)} disabled={!draft.trim()} className="bg-primary p-2 text-primary-foreground disabled:opacity-40"><ArrowUp className="size-4" /></button>
           )}
         </div>
-      </form>
+      </div>
     </aside>
   );
 }

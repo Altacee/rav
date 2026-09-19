@@ -84,7 +84,7 @@ export function DraftCard({ draft, accountId }: { draft: DraftProposal; accountI
     <div className={card}>
       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Draft reply</p>
       <p className="line-clamp-6 whitespace-pre-wrap">{draft.body}</p>
-      <Button size="sm" className="mt-3" disabled={state === "loading" || stale} onClick={openInCompose}>
+      <Button type="button" size="sm" className="mt-3" disabled={state === "loading" || stale} onClick={openInCompose}>
         {state === "loading" ? "Opening…" : "Open in compose"}
       </Button>
       {stale && <p className="mt-2 text-xs text-muted-foreground">From a different account; switch back to use it.</p>}
@@ -127,8 +127,8 @@ export function ActionCard({ action, accountId }: { action: ActionProposal; acco
         <p className="mt-2 text-xs text-primary">Done.</p>
       ) : (
         <div className="mt-3 flex gap-2">
-          <Button size="sm" onClick={confirm} disabled={state === "running" || stale}>Confirm</Button>
-          <Button size="sm" variant="ghost" onClick={() => setState("dismissed")} disabled={state === "running"}>Dismiss</Button>
+          <Button type="button" size="sm" onClick={confirm} disabled={state === "running" || stale}>Confirm</Button>
+          <Button type="button" size="sm" variant="ghost" onClick={() => setState("dismissed")} disabled={state === "running"}>Dismiss</Button>
         </div>
       )}
       {stale && <p className="mt-2 text-xs text-muted-foreground">From a different account; switch back to use it.</p>}
